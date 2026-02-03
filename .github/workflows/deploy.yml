@@ -22,7 +22,7 @@ jobs:
         with:
           clean: false # Mantém arquivos não versionados (como o .env)
 
-      # NÃO PRECISA DO PASSO DE 'RSYNC/SYNC'. 
+      # NÃO PRECISA DO PASSO DE 'RSYNC/SYNC' 
       # O actions/checkout já atualiza os arquivos na pasta do Runner.
       # Como usamos Docker com Volumes, ele já vai "ver" os arquivos novos automaticamente.
 
