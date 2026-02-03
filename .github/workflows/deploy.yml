@@ -3,7 +3,7 @@ name: Deploy Plataforma Completa (Windows)
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - 'data_plataform/**'
 
