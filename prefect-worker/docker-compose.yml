@@ -1,0 +1,18 @@
+version: "3.9"
+services:
+  prefect-worker:
+    build:
+      context: ..
+      dockerfile: prefect-worker/Dockerfile
+    image: custom-prefect-worker:3.6.13-python3.12
+    container_name: prefect_worker
+    restart: always
+    volumes:
+      - ../:/app
+    command: >
+      sh -c "sleep 5 && 
+            prefect work-pool create --type process 'process-pool' || true && 
+            prefect worker start --pool 'process-pool'"
+    environment:
+      - PYTHONPATH=/app:/app/pipelines:/app/tasks_python
+      - PREFECT_API_URL=http://host.docker.internal:4200/api

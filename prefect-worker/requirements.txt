@@ -1,0 +1,7 @@
+prefect==3.6.13
+duckdb
+sqlalchemy
+pymysql
+pandas
+polars
+python-dotenv
