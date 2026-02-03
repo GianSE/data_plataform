@@ -1,58 +1,63 @@
-name: Deploy Plataforma Completa
+name: Deploy Plataforma Completa (Windows)
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'data_plataform/**' # Monitora tudo dentro da pasta data_plataform
+      - 'data_plataform/**'
 
 jobs:
   deploy-production:
-    runs-on: self-hosted
+    # 1. Garante que roda no seu Windows com as tags certas
+    runs-on: [self-hosted, windows, production]
     
     defaults:
       run:
-        working-directory: /opt/drogamais/data_plataform # Define onde os comandos rodam no servidor
+        shell: powershell # Força uso do PowerShell
 
     steps:
-      - name: Checkout Código (Baixar do Git)
-        uses: actions/checkout@v3
+      - name: ⬇️ Checkout Código
+        uses: actions/checkout@v4
+        with:
+          clean: false # Mantém arquivos não versionados (como o .env)
 
-      - name: 1. Sincronizar Arquivos no Servidor
-        run: |
-          # Copia tudo do Git para a pasta do servidor
-          # O rsync é inteligente e só copia o que mudou
-          rsync -av --delete --exclude='.git' ./ /opt/drogamais/data_plataform/
+      # NÃO PRECISA DO PASSO DE 'RSYNC/SYNC'. 
+      # O actions/checkout já atualiza os arquivos na pasta do Runner.
+      # Como usamos Docker com Volumes, ele já vai "ver" os arquivos novos automaticamente.
 
-      - name: 2. Verificar Mudança em Dependências (Infra)
+      - name: 🔍 Verificar Mudança na Infra (Docker)
         id: check_infra
         uses: dorny/paths-filter@v2
         with:
           filters: |
             requirements:
-              - 'prefect-worker/requirements.txt'
-              - 'prefect-worker/Dockerfile'
+              - 'data_plataform/prefect-worker/requirements.txt'
+              - 'data_plataform/prefect-worker/Dockerfile'
+              - 'data_plataform/prefect-worker/docker-compose.yml'
 
-      - name: 3. Rebuildar Worker (Só se dependencies mudaram)
+      - name: 🐳 Rebuildar Worker (Se necessário)
         if: steps.check_infra.outputs.requirements == 'true'
         run: |
-          echo "⚠️ Dependências mudaram! Recriando container..."
-          docker compose -f prefect-worker/docker-compose.yml down
-          docker compose -f prefect-worker/docker-compose.yml build --no-cache
-          docker compose -f prefect-worker/docker-compose.yml up -d
+          Write-Host "⚠️ Dependências mudaram! Recriando container..."
+          cd data_plataform/prefect-worker
           
-          # Espera o worker subir antes de tentar registrar flows
-          sleep 15
+          # Força recriação sem cache
+          docker compose down
+          docker compose up -d --build --force-recreate
+          
+          # Espera um pouco para garantir que o banco interno subiu
+          Start-Sleep -Seconds 15
 
-      - name: 4. Validar Código Python (Safety Check)
+      - name: 🛡️ Validar Código Python (Safety Check)
         run: |
-          echo "🛡️ Validando integridade..."
-          # Como sua pasta pipelines está mapeada no volume, o container já vê os arquivos novos
-          docker exec prefect-worker python /app/_ops/check_imports.py
+          Write-Host "🛡️ Validando integridade..."
+          # CORREÇÃO: Caminho agora inclui 'pipelines' e nome do container é com underline (_)
+          docker exec prefect_worker python /app/pipelines/_ops/check_imports.py
 
-      - name: 5. Registrar Flows no Prefect
+      - name: 🚀 Registrar Flows no Prefect
         if: success()
         run: |
-          echo "🚀 Atualizando Flows..."
-          docker exec prefect-worker python /app/_ops/deploy_all.py
+          Write-Host "🚀 Atualizando Flows..."
+          # CORREÇÃO: Caminho atualizado
+          docker exec prefect_worker python /app/pipelines/_ops/deploy_all.py
