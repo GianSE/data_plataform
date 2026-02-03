@@ -1,7 +1,7 @@
 # 💊 Drogamais Data Platform
 
 Plataforma de Engenharia de Dados baseada em Prefect, DuckDB e MariaDB.
-Este projeto utiliza uma arquitetura orientada a domínios (Acode, Plugpharma, etc) orquestrada por fluxos Master.
+Este projeto utiliza uma arquitetura orientada a domínios (Acode, Plugpharma, etc) orquestrada por fluxos Master..
 
 ## 📂 Estrutura do Projeto
 
