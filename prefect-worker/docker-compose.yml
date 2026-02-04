@@ -14,8 +14,10 @@ services:
             prefect work-pool create --type process 'process-pool' --overwrite || true && 
             echo 'Auto-Deploying Flows...' && 
             python /app/_ops/deploy_all.py && 
+            echo 'Iniciando Worker: $${PREFECT_WORKER_NAME} &&
             echo 'Flows Updated! Starting Worker na Queue default...' && 
-            prefect worker start --pool 'process-pool' --work-queue 'default' --limit 3"
+            prefect worker start --pool 'process-pool' --work-queue 'default' --name $${PREFECT_WORKER_NAME} --limit 3"
     environment:
       - PYTHONPATH=/app:/app/pipelines:/app/tasks_python
       - PREFECT_API_URL=http://192.168.21.251:4200/api
+      - PREFECT_WORKER_NAME=worker-${HOSTNAME}
