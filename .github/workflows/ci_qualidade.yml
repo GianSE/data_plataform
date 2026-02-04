@@ -9,6 +9,17 @@ on:
 jobs:
   testes-rapidos:
     runs-on: ubuntu-latest
+    # Variáveis dummy para evitar o erro 'NoneType' no config.py
+    env:
+      DB_HOST: localhost
+      DB_USER: ci_user
+      DB_PASSWORD: ci_password
+      DB_NAME: ci_db
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: ci_key
+      MINIO_SECRET_KEY: ci_secret
+      MINIO_REGION: us-east-1
+
     steps:
       - name: ⬇️ Baixar Código
         uses: actions/checkout@v3
@@ -19,16 +30,14 @@ jobs:
           python-version: '3.12'
 
       - name: 📦 Instalar Libs Básicas
-        # Adicionei 'prefect' que é essencial para os imports dos flows funcionarem
         run: pip install prefect pandas sqlalchemy pymysql duckdb python-dotenv polars
 
       - name: 🔎 Teste 1 - Integridade do Catálogo
         run: |
-          # Adiciona a pasta 'pipelines' ao PYTHONPATH para achar 'flows_master'
           export PYTHONPATH=$PYTHONPATH:pipelines
           python _ops/check_catalog.py
 
       - name: 🕵️ Teste 2 - Checagem de Imports
         run: |
-          export PYTHONPATH=$PYTHONPATH:pipelines
+          # O PYTHONPATH agora é gerenciado internamente pelo script corrigido
           python _ops/check_imports.py
