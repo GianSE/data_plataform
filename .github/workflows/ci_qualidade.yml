@@ -1,0 +1,32 @@
+name: CI - Verificação de Qualidade (Sem Deploy)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  testes-rapidos:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⬇️ Baixar Código
+        uses: actions/checkout@v3
+
+      - name: 🐍 Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Instalar Libs Básicas
+        run: pip install prefect pandas sqlalchemy pymysql duckdb python-dotenv polars
+
+      - name: 🔎 Teste 1 - Integridade do Catálogo
+        run: |
+          export PYTHONPATH=$PYTHONPATH:.
+          python data_plataform/pipelines/flows_master/test_catalog.py
+
+      - name: 🕵️ Teste 2 - Checagem de Imports
+        run: |
+          export PYTHONPATH=$PYTHONPATH:.
+          python data_plataform/_ops/check_imports.py

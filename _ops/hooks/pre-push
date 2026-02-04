@@ -1,0 +1,25 @@
+#!/bin/bash
+echo "🛡️  [Git Hook] Validando integridade antes do Push..."
+
+# Tenta encontrar onde está o script, independente da estrutura
+if [ -f "data_plataform/pipelines/_ops/check_imports.py" ]; then
+    CHECK_SCRIPT="data_plataform/pipelines/_ops/check_imports.py"
+elif [ -f "data_plataform/_ops/check_imports.py" ]; then
+    CHECK_SCRIPT="data_plataform/_ops/check_imports.py"
+else
+    echo "⚠️  Aviso: Script check_imports.py não encontrado."
+    exit 0
+fi
+
+# Executa o verificador
+python "$CHECK_SCRIPT"
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "❌ BLOQUEADO: Seu código possui erros de importação."
+    exit 1
+fi
+
+echo "✅ Código validado! Enviando..."
+exit 0

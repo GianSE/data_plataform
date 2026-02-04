@@ -1,4 +1,5 @@
 import sys
+from prefect import task  # <--- Importante
 from prefect.client.schemas.schedules import CronSchedule
 from prefect.deployments import run_deployment
 
@@ -26,19 +27,24 @@ def gerenciar_run(pipeline_flow, entrypoint_name, deploy_name, cron_schedule):
         print("🧪 Executando Flow em modo de TESTE LOCAL...")
         pipeline_flow()
 
+@task(name="Disparar Deployment", task_run_name="Deploy: {nome_etapa}")
 def rodar_deployment(nome_etapa, deployment_id):
     """
-    Roda um deployment e cuida dos logs visuais (Emojis e Prints).
+    Roda um deployment e cuida dos logs.
+    Agora é uma TASK do Prefect, então aceita .submit() e wait_for.
     """
     print(f"\n⬇️  [{nome_etapa}] Iniciando execução...")
     
     try:
+        # O run_deployment já espera terminar (bloqueante)
         run_deployment(
             name=deployment_id,
-            timeout_seconds=None # Bloqueante: espera terminar
+            timeout_seconds=None 
         )
         print(f"✅ [{nome_etapa}] Finalizado com sucesso!")
         
     except Exception as e:
         print(f"❌ [{nome_etapa}] FALHOU!")
-        raise e # Repassa o erro para o Master parar também
+        # É crucial lançar o erro (raise) para a task ficar "Failed" 
+        # e impedir que as dependentes (wait_for) rodem.
+        raise e

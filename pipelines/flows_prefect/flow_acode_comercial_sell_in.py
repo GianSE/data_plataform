@@ -9,7 +9,7 @@ def pipeline():
 
     silver = python_task(
         script_name="silver_acode_compras_produto_comercial", 
-        python_base_bath=PY_PATH
+        python_base_path=PY_PATH
     )
     
     dim = python_task(

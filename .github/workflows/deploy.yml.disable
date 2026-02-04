@@ -3,7 +3,7 @@ name: Deploy Plataforma Completa (Windows)
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - 'data_plataform/**'
 
@@ -53,11 +53,11 @@ jobs:
         run: |
           Write-Host "🛡️ Validando integridade..."
           # CORREÇÃO: Caminho agora inclui 'pipelines' e nome do container é com underline (_)
-          docker exec prefect_worker python /app/pipelines/_ops/check_imports.py
+          docker exec prefect_worker python /app/_ops/check_imports.py
 
       - name: 🚀 Registrar Flows no Prefect
         if: success()
         run: |
           Write-Host "🚀 Atualizando Flows..."
           # CORREÇÃO: Caminho atualizado
-          docker exec prefect_worker python /app/pipelines/_ops/deploy_all.py
+          docker exec prefect_worker python /app/_ops/deploy_all.py

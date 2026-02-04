@@ -1,0 +1,20 @@
+#!/bin/sh
+# Hook pre-commit para validar o catálogo do Prefect
+
+echo "Running static analysis (Catalog Integrity)..."
+
+# Define o caminho raiz do projeto para o Python encontrar os módulos
+# (Assume que você roda o git da raiz do repositório)
+export PYTHONPATH=$PYTHONPATH:./data_plataform/pipelines
+
+# Roda o SEU script de teste de catálogo existente
+python data_plataform/pipelines/flows_master/test_catalog.py
+
+# Captura o resultado (0 = Sucesso, 1 = Erro)
+RESULT=$?
+if [ $RESULT -ne 0 ]; then
+ echo "❌ Validação do Catálogo falhou! Commit abortado."
+ exit 1
+fi
+
+exit 0
