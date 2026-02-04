@@ -19,14 +19,16 @@ jobs:
           python-version: '3.12'
 
       - name: 📦 Instalar Libs Básicas
+        # Adicionei 'prefect' que é essencial para os imports dos flows funcionarem
         run: pip install prefect pandas sqlalchemy pymysql duckdb python-dotenv polars
 
       - name: 🔎 Teste 1 - Integridade do Catálogo
         run: |
-          export PYTHONPATH=$PYTHONPATH:.
+          # Adiciona a pasta 'pipelines' ao PYTHONPATH para achar 'flows_master'
+          export PYTHONPATH=$PYTHONPATH:pipelines
           python _ops/check_catalog.py
 
       - name: 🕵️ Teste 2 - Checagem de Imports
         run: |
-          export PYTHONPATH=$PYTHONPATH:.
+          export PYTHONPATH=$PYTHONPATH:pipelines
           python _ops/check_imports.py
