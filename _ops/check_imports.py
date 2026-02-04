@@ -4,14 +4,21 @@ import importlib
 
 # --- CONFIGURAÇÃO DE CAMINHOS ---
 current_dir = os.path.dirname(os.path.abspath(__file__)) # .../_ops
-project_root = os.path.dirname(current_dir)              # .../pipelines
+project_root = os.path.dirname(current_dir)              # Raiz do projeto (data_plataform)
 
-# Adiciona a raiz ao Path para que os imports (ex: from settings import config) funcionem
+# Adiciona a raiz e a pasta pipelines ao Path
 if project_root not in sys.path:
     sys.path.append(project_root)
+pipelines_path = os.path.join(project_root, "pipelines")
+if pipelines_path not in sys.path:
+    sys.path.append(pipelines_path)
 
-# Pastas que serão auditadas
-DIRS_TO_SCAN = ["flows_etl", "flows_orchestration", "utils"]
+# --- CORREÇÃO: Pastas que realmente existem no seu projeto ---
+DIRS_TO_SCAN = [
+    "pipelines/flows_prefect", 
+    "pipelines/flows_master", 
+    "tasks_python"
+]
 
 def check_all_imports():
     print(f"🕵️  Iniciando verificação de integridade em: {DIRS_TO_SCAN}")
