@@ -9,7 +9,7 @@ sys.path.append(parent_dir)
 from flows_prefect._shared.wrappers import python_task
 from flows_prefect._shared.deployment import gerenciar_run
 
-PY_PATH = "/app/tasks_python/bronze/python"
+PY_PATH = "/app/tasks_python/bronze"
 
 @flow(name="Pipeline Bronze Acode Compras", timeout_seconds=7200)
 def pipeline():

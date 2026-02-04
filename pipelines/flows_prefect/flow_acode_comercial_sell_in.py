@@ -2,7 +2,7 @@ from prefect import flow
 from _shared.wrappers import python_task
 from _shared.deployment import gerenciar_run
 
-PY_PATH = "/app/tasks_python/comercial_sell_in/python"
+PY_PATH = "/app/tasks_python/comercial_sell_in"
 
 @flow(name="Pipeline Acode Compras Comercial")
 def pipeline():
