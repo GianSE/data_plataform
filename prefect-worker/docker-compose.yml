@@ -11,7 +11,11 @@ services:
       - ../:/app
     command: >
       sh -c "sleep 5 && 
+            sh -c "sleep 5 && 
             prefect work-pool create --type process 'process-pool' --overwrite || true && 
+            echo 'Auto-Deploying Flows...' && 
+            python /app/_ops/deploy_all.py && 
+            echo 'Flows Updated! Starting Worker...' && 
             prefect worker start --pool 'process-pool' --limit 3"
     environment:
       - PYTHONPATH=/app:/app/pipelines:/app/tasks_python

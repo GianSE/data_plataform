@@ -13,7 +13,7 @@ INTERNAL_SCRIPT_PATH = "/app/_ops/deploy_all.py"
 
 if not IN_DOCKER:
     # --- MODO HOST (WINDOWS) ---
-    print("\n🖥️  Você está no HOST (Windows).")
+    print("\n[PC] Você está no HOST (Windows).")
     print("📡 Conectando ao container 'prefect_worker' para rodar o deploy internamente...\n")
     
     try:
@@ -25,14 +25,14 @@ if not IN_DOCKER:
         result = subprocess.run(cmd)
         
         if result.returncode == 0:
-            print("\n✅ Sucesso! Comando remoto finalizado.")
+            print("\n[OK] Comando remoto finalizado.")
         else:
-            print("\n❌ Erro ao executar no container.")
+            print("\n[Erro] ao executar no container.")
             
     except FileNotFoundError:
-        print("❌ Erro: O comando 'docker' não foi encontrado. Você tem o Docker instalado?")
+        print("[Erro] O comando 'docker' não foi encontrado. Você tem o Docker instalado?")
     except KeyboardInterrupt:
-        print("\n⚠️ Interrompido pelo usuário.")
+        print("\n[Stop] Interrompido pelo usuário.")
         
     # Encerra o script aqui para o Windows não tentar rodar o resto
     sys.exit(0)
@@ -75,7 +75,7 @@ pythonpath_str = ":".join(paths_to_add)
 DIRS_TO_SCAN = ["flows_prefect", "flows_master"]
 
 def find_and_deploy_flows():
-    print(f"🕵️  [Container] Varrendo fluxos em: {pipelines_root}")
+    print(f"[Container] Varrendo fluxos em: {pipelines_root}")
     deployment_count = 0
 
     for directory in DIRS_TO_SCAN:
@@ -98,7 +98,7 @@ def find_and_deploy_flows():
                         for name, obj in inspect.getmembers(module):
                             if isinstance(obj, Flow):
                                 if obj.fn.__module__ == module.__name__:
-                                    print(f"🚀 Deployando: {obj.name} ({filename})")
+                                    print(f"Deployando: {obj.name} ({filename})")
                                     
                                     # Entrypoint correto
                                     file_rel_path = os.path.join(rel_dir, filename)
@@ -117,7 +117,7 @@ def find_and_deploy_flows():
                                     deployment_count += 1
                                     
                     except Exception as e:
-                        print(f"⚠️  Erro em {filename}: {e}")
+                        print(f"[Erro] em {filename}: {e}")
 
     print(f"\n✅ Total de Flows deployados: {deployment_count}")
 

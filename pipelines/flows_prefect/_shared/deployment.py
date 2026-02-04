@@ -9,7 +9,7 @@ def gerenciar_run(pipeline_flow, entrypoint_name, deploy_name, cron_schedule):
     Usa os argumentos da linha de comando: 'python flow.py deploy'
     """
     if len(sys.argv) > 1 and sys.argv[1] == "deploy":
-        print(f"🚀 Iniciando Deploy: {deploy_name} com Cron: {cron_schedule}")
+        print(f" Iniciando Deploy: {deploy_name} com Cron: {cron_schedule}")
         
         pipeline_flow.from_source(
             source="/app/pipelines/flows_prefect", 
