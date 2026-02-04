@@ -22,6 +22,7 @@ def pipeline():
 if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
-        entrypoint_name="flow_bronze_acode_compras.py:pipeline",
-        deploy_name="Pipeline Bronze Acode Compras"
+        entrypoint_name="bronze/flow_bronze_acode_compras.py:pipeline",
+        deploy_name="Pipeline Bronze Acode Compras",
+        cron_schedule="0 4 * * *"
     )

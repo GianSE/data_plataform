@@ -28,5 +28,6 @@ if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
         entrypoint_name="flow_comercial_sell_in.py:pipeline",
-        deploy_name="Pipeline Acode Compras Comercial"
+        deploy_name="Pipeline Acode Compras Comercial",
+        cron_schedule=None
     )
