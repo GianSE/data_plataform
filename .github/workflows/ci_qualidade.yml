@@ -24,7 +24,7 @@ jobs:
       - name: 🔎 Teste 1 - Integridade do Catálogo
         run: |
           export PYTHONPATH=$PYTHONPATH:.
-          python data_plataform/pipelines/flows_master/test_catalog.py
+          python data_plataform/_ops/check_catalog.py
 
       - name: 🕵️ Teste 2 - Checagem de Imports
         run: |
