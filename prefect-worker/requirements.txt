@@ -5,3 +5,5 @@ pymysql
 pandas
 polars
 python-dotenv
+pyarrow
+s3fs
