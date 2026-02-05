@@ -25,5 +25,5 @@ if __name__ == "__main__":
         entrypoint_name="silver/flow_silver_acode_compras_comercial.py:pipeline",
         deploy_name="Silver Acode Compras Comercial",
         tags=["MinIO"],
-        cron_schedule="0 12 * * *"
+        cron_schedule="0 13 * * *"
     )

@@ -98,6 +98,10 @@ class AcodeBronzeETL:
         if df_final.empty:
             print(f"⚠️ {data_proc}: Nenhum dado encontrado na origem. Abortando gravação para evitar arquivos vazios.")
             return # Sai da função sem criar pastas ou arquivos
+        # === CORREÇÃO DO ERRO (Adicione isto aqui) ===
+        # Converte datetime.date (do SQL) para datetime64 (do Pandas/Parquet)
+        if 'data_emissao' in df_final.columns:
+            df_final['data_emissao'] = pd.to_datetime(df_final['data_emissao'])
         # ---------------------------
 
         # 3. Salva a versão final consolidada
