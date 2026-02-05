@@ -69,54 +69,50 @@ class AcodeBronzeETL:
             print(f"❌ Erro ao buscar retroativos: {e}")
             return []
 
-    def extrair_e_salvar(self, data_proc, qtd_esperada):
-        print(f"⬇️ Consolidando {data_proc} (Lake + Novos Retroativos)...")
+    def extrair_e_salvar(self, data_proc):
+        print(f"⬇️ Substituindo {data_proc} (Carga Completa - Overwrite)...")
         
-        # 1. Busca dados novos (Retroativos) do MariaDB
-        sql_retro = f"SELECT *, 'RETROATIVO' as origem_sistema FROM si_15_cubo_xml_analitico_diario_retroativo WHERE data_proc = '{data_proc}'"
-        df_novo = pd.read_sql(sql_retro, self.get_engine())
+        # 1. Busca SEMPRE o dia completo (Diário + Retroativo)
+        # Isso evita duplicidade e garante que o Lake espelhe o MariaDB fielmente
+        sql_full = f"""
+            SELECT *, 'DIARIO' as origem_sistema FROM si_15_cubo_xml_analitico_diario WHERE data_proc = '{data_proc}'
+            UNION ALL
+            SELECT *, 'RETROATIVO' as origem_sistema FROM si_15_cubo_xml_analitico_diario_retroativo WHERE data_proc = '{data_proc}'
+        """
+        
+        try:
+            df_final = pd.read_sql(sql_full, self.get_engine())
+        except Exception as e:
+            print(f"❌ Erro ao ler do MariaDB: {e}")
+            return
 
+        # 2. Prepara o caminho do S3
         dt_obj = pd.to_datetime(data_proc)
         s3_folder = f"{BUCKET_BRONZE}/ano={dt_obj.year}/mes={dt_obj.month:02d}/data_proc={data_proc}"
         s3_path = f"{s3_folder}/{data_proc}_v1.parquet"
 
-        # 2. Se já existe dado no Lake, faz a fusão
-        if self.verificar_total_s3(data_proc) > 0:
-            self._init_duckdb()
-            df_atual = self.con_duck.execute(f"SELECT * FROM read_parquet('{s3_path}')").df()
-            df_final = pd.concat([df_atual, df_novo]).drop_duplicates()
-        else:
-            # Se o Lake está vazio, tenta carga inicial (Diário + Retroativo)
-            sql_full = f"""
-                SELECT *, 'DIARIO' as origem_sistema FROM si_15_cubo_xml_analitico_diario WHERE data_proc = '{data_proc}'
-                UNION ALL
-                SELECT *, 'RETROATIVO' as origem_sistema FROM si_15_cubo_xml_analitico_diario_retroativo WHERE data_proc = '{data_proc}'
-            """
-            df_final = pd.read_sql(sql_full, self.get_engine())
-
-        # --- NOVA VALIDAÇÃO AQUI ---
+        # 3. Validação de Vazio
         if df_final.empty:
-            print(f"⚠️ {data_proc}: Nenhum dado encontrado na origem. Abortando gravação para evitar arquivos vazios.")
-            return # Sai da função sem criar pastas ou arquivos
-        # === CORREÇÃO DO ERRO (Adicione isto aqui) ===
-        # Converte datetime.date (do SQL) para datetime64 (do Pandas/Parquet)
+            print(f"⚠️ {data_proc}: Nenhum dado encontrado na origem. Abortando gravação.")
+            return 
+
+        # 4. Correção de Tipagem (Para evitar erro pyarrow)
         if 'data_emissao' in df_final.columns:
             df_final['data_emissao'] = pd.to_datetime(df_final['data_emissao'])
-        # ---------------------------
 
-        # 3. Salva a versão final consolidada
+        # 5. Salva (Sobrescrevendo o arquivo anterior)
         storage_options = {
             "key": MINIO_CONFIG["access_key"], 
             "secret": MINIO_CONFIG["secret_key"],
             "client_kwargs": {"endpoint_url": f"http://{MINIO_CONFIG['endpoint']}"}
         }
         
+        # Remove a coluna de partição se ela existir no DF
         if 'data_proc' in df_final.columns:
             df_final = df_final.drop(columns=['data_proc'])
             
         df_final.to_parquet(s3_path, index=False, storage_options=storage_options, compression='snappy')
-        print(f"✅ {data_proc} atualizado no Lake ({len(df_final)} registros).")
-
+        print(f"✅ {data_proc} corrigido e sincronizado no Lake ({len(df_final)} registros).")
     def run(self):
         print("🚀 Iniciando Sincronização Bronze (Drogamais)...")
         
@@ -139,7 +135,7 @@ class AcodeBronzeETL:
 
             if qtd_s3 != qtd_remota:
                 print(f"   🔄 Divergência detectada em {str_dia}. Sincronizando...")
-                self.extrair_e_salvar(str_dia, qtd_remota)
+                self.extrair_e_salvar(str_dia)
             else:
                 print(f"   👍 {str_dia}: Integridade OK.")
 
@@ -169,7 +165,7 @@ class AcodeBronzeETL:
 
                 if qtd_s3 != qtd_remota:
                     print(f"   🔄 [RETRO] Divergência em {str_dia}. Atualizando...")
-                    self.extrair_e_salvar(str_dia, qtd_remota)
+                    self.extrair_e_salvar(str_dia)
                 else:
                     print(f"   👍 {str_dia}: Sincronizado.")
 
