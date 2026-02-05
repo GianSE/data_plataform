@@ -49,8 +49,8 @@ def processar_silver():
                 Desc_Marca,
                 
                 -- Métricas Consolidadas (Soma do mês)
-                SUM(ACODE_Val_Total) AS ACODE_Val_Total,
-                SUM(Qtd_Trib)        AS Qtd_Trib,
+                SUM(CAST(ACODE_Val_Total AS DECIMAL(15,4))) AS ACODE_Val_Total,
+                SUM(CAST(Qtd_Trib AS DECIMAL(10,4)))        AS Qtd_Trib,
                 
                 -- Auditoria
                 now() AS data_atualizacao
