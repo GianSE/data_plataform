@@ -6,6 +6,7 @@ import hashlib
 import json
 
 # --- CONFIGURAÇÃO DE CAMINHOS ---
+# Usa caminho absoluto para evitar erros de "file not found"
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 
@@ -16,6 +17,8 @@ FILES_TO_MONITOR = [
 ]
 
 HASH_STORAGE = os.path.join(current_dir, ".requirements_hashes.json")
+
+# --- FUNÇÕES UTILITÁRIAS ---
 
 def get_file_hash(path):
     """Calcula MD5 do arquivo para saber se mudou"""
@@ -64,10 +67,59 @@ def run_command(command, description):
         return False
     return True
 
+# --- NOVA FUNÇÃO: DRENAGEM (SIGTERM) ---
+def graceful_drain(color, timeout=None):
+    """
+    Envia SIGTERM para os containers da cor antiga e aguarda finalização.
+    timeout=None espera infinitamente (recomendado para ETLs longos).
+    """
+    # 1. Identifica os IDs dos containers antigos
+    try:
+        cmd_find = f'docker ps --filter "name=worker-{color}" -q'
+        ids = subprocess.run(cmd_find, shell=True, capture_output=True, text=True).stdout.strip().split('\n')
+        ids = [x for x in ids if x] # Remove vazios
+    except Exception:
+        ids = []
+
+    if not ids:
+        print(f"[INFO] Nenhum container {color} encontrado para drenar.")
+        return
+
+    # 2. Envia SIGTERM (Para de pegar jobs, termina os atuais)
+    print(f"[STOP] Enviando SIGTERM para infraestrutura antiga ({color})...")
+    subprocess.run(f"docker kill --signal=SIGTERM {' '.join(ids)}", shell=True)
+
+    # 3. Loop de Espera
+    print(f"[WAIT] Aguardando jobs pendentes no '{color}' finalizarem...")
+    if timeout:
+        print(f"       (Timeout: {timeout}s)")
+    else:
+        print("       (Modo Infinito: O script aguardará até o fim dos jobs)")
+
+    start_time = time.time()
+    while True:
+        # Verifica se ainda existe algum container rodando
+        check_cmd = f'docker ps --filter "name=worker-{color}" -q'
+        remaining = subprocess.run(check_cmd, shell=True, capture_output=True, text=True).stdout.strip()
+
+        if not remaining:
+            print(" [OK] Worker ({color}) desligou graciosamente.")
+            break
+
+        # Checagem de Timeout (se definido)
+        if timeout and (time.time() - start_time) > timeout:
+            print("[TIMEOUT] Tempo limite esgotado! Forçando desligamento...")
+            break
+        
+        time.sleep(5)
+
+# --- FUNÇÃO PRINCIPAL ---
+
 def rebuild_blue_green():
-    # Caminho do Docker Compose
+    # Caminho do Docker Compose (ajusta dependendo de onde roda)
     docker_dir = os.path.join(project_root, "prefect-worker")
     if not os.path.exists(docker_dir):
+        # Fallback caso a pasta se chame apenas 'prefect'
         docker_dir = os.path.join(project_root, "prefect") 
     
     os.chdir(docker_dir)
@@ -82,6 +134,7 @@ def rebuild_blue_green():
     # 2. Identificar cor atual
     is_blue_active = False
     try:
+        # Verifica se existe algum container rodando com 'worker-blue' no nome
         check_blue = subprocess.run(
             'docker ps --filter "name=worker-blue" -q', 
             shell=True, capture_output=True, text=True
@@ -96,56 +149,45 @@ def rebuild_blue_green():
     
     print(f"[INFO] Ciclo Blue-Green: {current_color} (Atual) -> {new_color} (Novo)")
 
-    # --- CORREÇÃO AQUI: BUILD SEPARADO ---
+    # 3. Build e Up do Novo
     if needs_build:
-        print("[BUILD] Mudanças detectadas. Iniciando Build ZERO CACHE...")
-        # Passo 1: Build explícito com --no-cache
+        print(f"[BUILD] Mudanças detectadas. Iniciando Build do {new_color}...")
+        # Build explícito para o projeto específico
         cmd_build = f"docker compose -p worker-{new_color} build --no-cache"
         if not run_command(cmd_build, f"Construindo imagem worker-{new_color}"):
             sys.exit(1)
     else:
         print("[SKIP] Nenhuma mudança nas dependências. Usando imagem em cache.")
 
-    # Passo 2: Up (apenas sobe, pois o build já foi feito ou não é necessário)
+    # Sobe a nova stack (Define o nome do projeto com -p)
     cmd_up = f"docker compose -p worker-{new_color} up -d --remove-orphans"
-    
     success = run_command(cmd_up, f"Subindo worker-{new_color}")
     if not success:
         sys.exit(1)
 
-    # 4. Salva hashes se houve sucesso no build
+    # 4. Salva hashes se houve sucesso no build (e se foi necessário)
     if needs_build:
         save_new_hashes(new_hashes)
 
-    # 5. Estabilização
-    print("[WAIT] Aguardando 10 segundos para estabilização...")
-    time.sleep(10)
+    # 5. Estabilização (Para garantir que o novo comece a pegar jobs)
+    print("[WAIT] Aguardando 15 segundos para o novo worker estabilizar...")
+    time.sleep(15)
 
-    # 6. Parar o antigo
-    try:
-        old_ids = subprocess.run(
-            f'docker ps --filter "name=worker-{current_color}" -q',
-            shell=True, capture_output=True, text=True
-        ).stdout.strip().split('\n')
-        
-        old_ids = [oid for oid in old_ids if oid]
+    # 6. Drenagem e Remoção do Antigo
+    if current_color:
+        # AQUI ESTÁ A MUDANÇA: Chama a drenagem em vez de matar direto
+        graceful_drain(current_color, timeout=None) # timeout=None espera pra sempre
 
-        if old_ids:
-            print(f"[STOP] Parando infraestrutura antiga ({current_color})...")
-            subprocess.run(f"docker kill {' '.join(old_ids)}", shell=True, capture_output=True)
-            run_command(f"docker compose -p worker-{current_color} down", "Removendo stack antiga")
-        else:
-            print(f"[INFO] Nenhum container {current_color} encontrado para remover.")
+        # Depois que desligou, remove a stack (limpa redes e referências)
+        print(f"[CLEAN] Removendo stack antiga ({current_color})...")
+        run_command(f"docker compose -p worker-{current_color} down", "Limpando recursos antigos")
 
-    except Exception as e:
-        print(f"[AVISO] Erro ao tentar remover antigo: {e}")
-
-    # 7. Limpeza de Imagens
+    # 7. Limpeza de Imagens soltas
     if needs_build:
         print("[CLEAN] Limpando imagens antigas (dangling)...")
         subprocess.run("docker image prune -f", shell=True, capture_output=True)
 
-    print(f"[OK] Sucesso! Worker ({new_color}) está ativo.")
+    print(f"[OK] Sucesso! Apenas Worker ({new_color}) está ativo.")
 
 if __name__ == "__main__":
     rebuild_blue_green()
