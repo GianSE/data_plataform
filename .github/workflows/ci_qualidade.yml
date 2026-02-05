@@ -32,13 +32,20 @@ jobs:
       - name: 📦 Instalar Dependências
         run: |
           pip install -r prefect-worker/requirements.txt
+          # Instala as ferramentas de qualidade
           pip install ruff bandit mypy pytest
 
       - name: 🕵️ Teste - Checagem de Imports
+        # Valida se não faltou nenhum arquivo ou lib
         run: python _ops/check_imports.py
 
-      - name: 🎨 Linter e Estilo
+      - name: 🎨 Linter e Estilo (Ruff)
+        # Lê o pyproject.toml automaticamente para ignorar E402
         run: ruff check .
 
-      - name: 🛡️ Auditoria de Segurança
-        run: bandit -r tasks_python/ -x tasks_python/utils/__pycache__
+      - name: 🛡️ Auditoria de Segurança (Bandit)
+        # -r: recursivo
+        # -x: ignora pastas de cache
+        # -ll: ignora erros de severidade "Baixa" (foca no Médio/Alto)
+        # -s B608: Pula verificação de SQL Injection (Falso positivo em ETL)
+        run: bandit -r tasks_python/ -x tasks_python/utils/__pycache__ -ll -s B608
