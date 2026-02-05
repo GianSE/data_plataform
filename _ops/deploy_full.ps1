@@ -13,7 +13,7 @@ $ListaServidores = @(
     @{
         Nome   = "Servidor Secundário (.252)"
         IP     = "192.168.21.252"
-        User   = "altaneiro.ti02"
+        User   = "apf.ti02"
         Path   = "C:\Docker\data_plataform"
     }
 )
@@ -44,9 +44,18 @@ foreach ($Server in $ListaServidores) {
 
     # 2.2 Executa Comandos no Servidor Remoto
     Invoke-Command -ComputerName $Server.IP -Credential $cred -ScriptBlock {
-        $ErrorActionPreference = "Continue" # Mudado para Continue para evitar crash com output do Git
+        $ErrorActionPreference = "Continue"
         $Path = $using:Server.Path
         $ServerName = $env:COMPUTERNAME
+
+        # --- ETAPA 0: AJUSTE DE AMBIENTE (GIT FIX) ---
+        # Adiciona os caminhos comuns do Git ao PATH da sessão atual
+        $GitPaths = @("C:\Program Files\Git\cmd", "C:\Program Files (x86)\Git\cmd")
+        foreach ($GP in $GitPaths) {
+            if ((Test-Path $GP) -and ($env:Path -notlike "*$GP*")) {
+                $env:Path += ";$GP"
+            }
+        }
         
         Write-Host "[$ServerName] [DIR] Acessando pasta do projeto..."
         
