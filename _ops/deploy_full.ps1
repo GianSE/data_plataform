@@ -26,19 +26,25 @@ foreach ($Server in $ListaServidores) {
     Write-Host "[CONN] Conectando em: $($Server.Nome) ($($Server.IP))"
     Write-Host "------------------------------------------------------" -ForegroundColor Yellow
     
-    # 2.1 Pede a senha
+    # 2.1 Pede a senha com verificação
+    $cred = $null
     try {
         $msg = "Digite a senha para $($Server.User) em $($Server.IP)"
         $cred = Get-Credential -UserName $Server.User -Message $msg
     }
     catch {
-        Write-Host "[SKIP] Cancelado pelo usuario." -ForegroundColor Red
+        Write-Host "[SKIP] Erro ao capturar credenciais." -ForegroundColor Red
+        continue
+    }
+
+    if ($null -eq $cred) {
+        Write-Host "[SKIP] Senha não informada ou cancelada. Pulando servidor." -ForegroundColor Red
         continue
     }
 
     # 2.2 Executa Comandos no Servidor Remoto
     Invoke-Command -ComputerName $Server.IP -Credential $cred -ScriptBlock {
-        $ErrorActionPreference = "Stop"
+        $ErrorActionPreference = "Continue" # Mudado para Continue para evitar crash com output do Git
         $Path = $using:Server.Path
         $ServerName = $env:COMPUTERNAME
         
@@ -53,10 +59,12 @@ foreach ($Server in $ListaServidores) {
 
         # --- ETAPA 1: GIT PULL ---
         Write-Host "`n[$ServerName] [GIT] [1/3] Executando Git Pull..." -ForegroundColor Cyan
-        $gitOut = git pull origin main 2>&1
+        
+        # Usando cmd /c para isolar o git do tratamento de exceção do PowerShell remoto
+        cmd /c "git pull origin main"
+        
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "[$ServerName] [ERRO] Falha no Git Pull. Abortando." -ForegroundColor Red
-            $gitOut | ForEach-Object { Write-Host "   $_" }
+            Write-Host "[$ServerName] [ERRO] Falha no Git Pull. Verifique conflitos ou credenciais." -ForegroundColor Red
             return
         }
         Write-Host "[$ServerName] [OK] Codigo atualizado." -ForegroundColor Green
@@ -64,8 +72,6 @@ foreach ($Server in $ListaServidores) {
         # --- ETAPA 2: REBUILD WORKER ---
         Write-Host "`n[$ServerName] [INFRA] [2/3] Verificando Docker (Rebuild Worker)..." -ForegroundColor Cyan
         
-        # Executa o script Python e exibe o output em tempo real
-        # Usamos cmd /c para garantir que o stdout seja capturado corretamente no Invoke-Command
         cmd /c "python .\_ops\rebuild_worker.py"
         
         if ($LASTEXITCODE -ne 0) {
