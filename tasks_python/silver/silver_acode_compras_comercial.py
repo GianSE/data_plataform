@@ -1,24 +1,23 @@
 import duckdb
 import os
 import sys
-from _settings.config import DUCKDB_SECRET_SQL, setup_minio_env
 
 # Ajuste de PATH para encontrar módulos pai (config, utils)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
+from _settings.config import DUCKDB_SECRET_SQL, setup_minio_env
 
 # 1. Configura ambiente MinIO
 setup_minio_env()
 
 # Definições de Caminho
-# O asterisco duplo (**) faz o DuckDB ler recursivamente todas as pastas de dia da Bronze
 BRONZE_PATH = "s3://bronze/compras-acode/**/*.parquet"
 SILVER_PATH = "s3://silver/silver_acode_compras_produto_comercial/"
 
 def processar_silver():
-    print("🚀 Iniciando Consolidação Silver (Agregado + Partição por Ano)...")
+    print(f"🚀 Iniciando Consolidação Silver (Agregado + Partição por Ano)...")
     
     con = duckdb.connect()
     try:
@@ -26,31 +25,33 @@ def processar_silver():
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(DUCKDB_SECRET_SQL)
 
-        # Lógica SQL (Exatamente a sua, adaptada para DuckDB)
-        # Adicionei a coluna 'ano' extraída da data_emissao para usar no particionamento
+        # Lógica SQL Blindada contra negativos (Ex: -571370)
         query = f"""
         COPY (
             SELECT 
                 EAN,
                 Loja_CNPJ,
-                -- Converte '202502' (VARCHAR) direto para DATE (2025-02-01)
+                -- Converte '202502' (VARCHAR) direto para DATE
                 strptime(Ano_Mes, '%Y%m')::DATE AS Ano_Mes, 
                 
                 -- Coluna virtual (HIVE) para particionamento físico
                 ano, 
                 
-                -- Granularidade de Atributos (Detalhamento total)
+                -- Granularidade de Atributos
                 Produto,
                 Fabricante,
                 MAX(Fornecedor) AS Fornecedor,
-                LPAD(CAST(Fornecedor_CNPJ AS VARCHAR), 14, '0') AS Fornecedor_CNPJ,
+
+                -- [CORREÇÃO] Cast duplo: primeiro para BIGINT (suporta negativos) depois VARCHAR
+                LPAD(CAST(CAST(Fornecedor_CNPJ AS BIGINT) AS VARCHAR), 14, '0') AS Fornecedor_CNPJ,
+                
                 Grupo,
                 Sub_Classe,
                 Desc_Marca,
                 
-                -- Métricas Consolidadas (Soma do mês)
-                SUM(CAST(ACODE_Val_Total AS DECIMAL(15,4))) AS ACODE_Val_Total,
-                SUM(CAST(Qtd_Trib AS DECIMAL(10,4)))        AS Qtd_Trib,
+                -- [CORREÇÃO] Força o Cast para tipos sinalizados antes da soma
+                SUM(CAST(ACODE_Val_Total AS DECIMAL(18,4))) AS ACODE_Val_Total,
+                SUM(CAST(Qtd_Trib AS BIGINT))               AS Qtd_Trib,
                 
                 -- Auditoria
                 now() AS data_atualizacao
@@ -82,7 +83,6 @@ def processar_silver():
         con.execute(query)
         
         print(f"✅ Sucesso! Dados salvos em: {SILVER_PATH}")
-        print("   📂 Estrutura criada: /ano=2024/arquivo.parquet, /ano=2025/arquivo.parquet...")
 
     except Exception as e:
         print(f"❌ Erro ao processar Silver: {e}")

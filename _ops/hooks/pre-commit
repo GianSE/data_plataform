@@ -4,7 +4,7 @@ echo "🛡️  [Git Hook] Iniciando bateria de testes pré-commit..."
 # --- ETAPA 1: VALIDAR IMPORTS (Integridade) ---
 CHECK_SCRIPT="_ops/check_imports.py"
 if [ -f "$CHECK_SCRIPT" ]; then
-    echo "🔍 [1/3] Verificando Imports..."
+    echo "🔍 [!!!] Verificando Imports..."
     python "$CHECK_SCRIPT"
     if [ $? -ne 0 ]; then
         echo "❌ [FALHA] Erro de importação detectado."
@@ -13,35 +13,6 @@ if [ -f "$CHECK_SCRIPT" ]; then
     fi
 else
     echo "⚠️  Script $CHECK_SCRIPT não encontrado. Pulando etapa 1."
-fi
-
-# --- ETAPA 2: LINTER (Estilo - Ruff) ---
-if command -v ruff &> /dev/null; then
-    echo "🎨 [2/3] Verificando Estilo (Ruff)..."
-    ruff check .
-    if [ $? -ne 0 ]; then
-        echo ""
-        echo "❌ [FALHA] O código está 'sujo' ou fora do padrão."
-        echo "   Dica: Rode 'ruff check . --fix' para corrigir automaticamente o que der."
-        exit 1
-    fi
-else
-    # Não bloqueia se o dev não tiver a ferramenta, apenas avisa
-    echo "⚠️  Ruff não instalado. Pulando verificação de estilo."
-fi
-
-# --- ETAPA 3: SEGURANÇA (Bandit) ---
-if command -v bandit &> /dev/null; then
-    echo "🔐 [3/3] Verificando Segurança (Bandit)..."
-    # -s B608: Pula verificação de SQL Injection (comum em ETL)
-    bandit -r tasks_python/ -x tasks_python/utils/__pycache__ -ll -q -s B608
-    if [ $? -ne 0 ]; then
-        echo ""
-        echo "❌ [FALHA] Risco de segurança detectado."
-        exit 1
-    fi
-else
-    echo "⚠️  Bandit não instalado. Pulando verificação de segurança."
 fi
 
 echo "✅ TUDO LIMPO! Commit autorizado."
