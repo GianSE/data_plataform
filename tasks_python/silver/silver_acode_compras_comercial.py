@@ -1,13 +1,13 @@
 import duckdb
 import os
 import sys
+from _settings.config import DUCKDB_SECRET_SQL, setup_minio_env
 
 # Ajuste de PATH para encontrar módulos pai (config, utils)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from _settings.config import DUCKDB_SECRET_SQL, setup_minio_env
 
 # 1. Configura ambiente MinIO
 setup_minio_env()
@@ -18,7 +18,7 @@ BRONZE_PATH = "s3://bronze/compras-acode/**/*.parquet"
 SILVER_PATH = "s3://silver/silver_acode_compras_produto_comercial/"
 
 def processar_silver():
-    print(f"🚀 Iniciando Consolidação Silver (Agregado + Partição por Ano)...")
+    print("🚀 Iniciando Consolidação Silver (Agregado + Partição por Ano)...")
     
     con = duckdb.connect()
     try:

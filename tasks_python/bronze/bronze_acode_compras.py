@@ -2,16 +2,16 @@ import os
 import sys
 import pandas as pd
 import duckdb
-from datetime import date, timedelta, datetime
-from typing import List, Dict
+from datetime import date, timedelta
+from typing import List
 from sqlalchemy import create_engine
+from _settings.config import MINIO_CONFIG, setup_minio_env, DUCKDB_SECRET_SQL
 
 # 1. Ajuste de PATH e Imports locais
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir) 
 sys.path.append(parent_dir)
 
-from _settings.config import MINIO_CONFIG, setup_minio_env, DUCKDB_SECRET_SQL
 
 # Configurações conforme seu ambiente na Drogamais
 DB_ACODE = {
@@ -47,7 +47,7 @@ class AcodeBronzeETL:
         try:
             query = f"SELECT COUNT(*) as qtd FROM read_parquet('{s3_path}')"
             return self.con_duck.execute(query).fetchone()[0]
-        except:
+        except Exception:
             return 0
 
     def obter_total_esperado(self, data_proc) -> int:
@@ -56,7 +56,7 @@ class AcodeBronzeETL:
             engine = self.get_engine()
             res = pd.read_sql(sql, engine)
             return int(res["total"].iloc[0]) if not res.empty and res["total"].iloc[0] is not None else 0
-        except:
+        except Exception:
             return 0
 
     def obter_datas_com_retroativo(self) -> List[date]:
@@ -114,11 +114,11 @@ class AcodeBronzeETL:
         print(f"✅ {data_proc} atualizado no Lake ({len(df_final)} registros).")
 
     def run(self):
-        print(f"🚀 Iniciando Sincronização Bronze (Drogamais)...")
+        print("🚀 Iniciando Sincronização Bronze (Drogamais)...")
         
         # 1. LOOP DE SEGURANÇA - ÚLTIMOS 7 DIAS
         # Isso garante que se o diário for D-1, D-2 ou até D-7, o script captura
-        print(f"📅 [CHECK RECENTE] Verificando integridade dos últimos 7 dias...")
+        print("📅 [CHECK RECENTE] Verificando integridade dos últimos 7 dias...")
         
         datas_recentes = []
         for i in range(1, 8):
@@ -149,7 +149,7 @@ class AcodeBronzeETL:
             # Lista de strings das datas recentes para não processar em duplicidade
             str_recentes = [d.strftime('%Y-%m-%d') for d in datas_recentes]
             
-            print(f"\n📅 [CHECK RETROATIVOS] Analisando datas sinalizadas no banco...")
+            print("\n📅 [CHECK RETROATIVOS] Analisando datas sinalizadas no banco...")
 
             for data_alvo in sorted(datas_retro, reverse=True):
                 str_dia = data_alvo.strftime('%Y-%m-%d')

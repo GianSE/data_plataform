@@ -3,14 +3,14 @@ import pymysql
 import os
 import tempfile
 import sys
+from _utils.monitor import DBMonitor
+from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 # Para enxergar um diretório acima
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from _utils.monitor import DBMonitor
-from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 # 1. Configura o ambiente (MinIO) automaticamente
 setup_minio_env()
@@ -157,13 +157,15 @@ def csv_mariadb():
 
     except Exception as e:
         print(f"❌ Erro no MariaDB: {e}")
-        if conn: conn.rollback()
+        if conn: 
+            conn.rollback()
         sys.exit(1)
     finally:
-        if conn: conn.close()
+        if conn: 
+            conn.close()
 
 def limpar_temp():
-    print(f"🧹 [3/3] Limpeza de arquivos temporários...")
+    print("🧹 [3/3] Limpeza de arquivos temporários...")
     if os.path.exists(CSV_PATH):
         try:
             os.remove(CSV_PATH)

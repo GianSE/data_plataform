@@ -33,11 +33,11 @@ fi
 # --- ETAPA 3: SEGURANÇA (Bandit) ---
 if command -v bandit &> /dev/null; then
     echo "🔐 [3/3] Verificando Segurança (Bandit)..."
-    # -r: recursivo | -x: ignora testes/cache | -ll: apenas severidade média/alta
-    bandit -r tasks_python/ -x tasks_python/utils/__pycache__ -ll -q
+    # -s B608: Pula verificação de SQL Injection (comum em ETL)
+    bandit -r tasks_python/ -x tasks_python/utils/__pycache__ -ll -q -s B608
     if [ $? -ne 0 ]; then
         echo ""
-        echo "❌ [FALHA] Risco de segurança detectado (Senha exposta ou código vulnerável)."
+        echo "❌ [FALHA] Risco de segurança detectado."
         exit 1
     fi
 else

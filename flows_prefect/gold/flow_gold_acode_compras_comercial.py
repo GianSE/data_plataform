@@ -1,13 +1,13 @@
 from prefect import flow
 import os
 import sys
+from flows_prefect._shared.wrappers import python_task
+from flows_prefect._shared.deployment import gerenciar_run
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from flows_prefect._shared.wrappers import python_task
-from flows_prefect._shared.deployment import gerenciar_run
 
 PY_PATH = "/app/tasks_python/gold"
 

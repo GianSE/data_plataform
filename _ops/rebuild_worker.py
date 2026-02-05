@@ -42,7 +42,7 @@ def check_if_build_needed():
         try:
             with open(HASH_STORAGE, 'r') as f:
                 stored_hashes = json.load(f)
-        except:
+        except Exception:
             pass 
 
     # 3. Compara
@@ -88,7 +88,7 @@ def rebuild_blue_green():
         ).stdout.strip()
         if check_blue:
             is_blue_active = True
-    except:
+    except Exception:
         pass
 
     new_color = "green" if is_blue_active else "blue"

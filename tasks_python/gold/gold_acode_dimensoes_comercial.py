@@ -2,13 +2,13 @@ import duckdb
 import pymysql
 import os
 import sys
+from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 # Ajuste de PATH
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 setup_minio_env()
 S3_BASE = "s3://silver/silver_acode_compras_produto_comercial/**/*.parquet"
@@ -76,10 +76,6 @@ def duckdb_csv(config):
             select_cols.append(f"CAST(regexp_replace(\"{col}\", '[\n\r;]', '', 'g') AS VARCHAR) AS \"{novo_nome}\"")
             
         select_str = ", ".join(select_cols)
-
-        # Group By para pegar a MAX data
-        num_cols = len(config["colunas_origem"])
-        indices_group_by = ", ".join([str(i) for i in range(1, num_cols + 2)]) 
 
         query = f"""
         COPY (
@@ -161,7 +157,8 @@ def csv_mariadb(config, CSV_PATH):
             try:
                 cursor.execute(f"CREATE INDEX idx_busca_{col_nome} ON {table_new} (`{col_nome}`(50))")
                 cursor.execute(f"CREATE INDEX idx_Ano_Mes ON {table_new} (Ano_Mes)")
-            except: pass
+            except Exception: 
+                pass
 
         # Swap
         cursor.execute(f"SHOW TABLES LIKE '{table_prod}'")
@@ -176,14 +173,18 @@ def csv_mariadb(config, CSV_PATH):
 
     except Exception as e:
         print(f"   ❌ Erro no MariaDB: {e}")
-        if conn: conn.rollback()
+        if conn: 
+            conn.rollback()
     finally:
-        if conn: conn.close()
+        if conn: 
+            conn.close()
 
 def limpar_temp(CSV_PATH):
     if CSV_PATH and os.path.exists(CSV_PATH):
-        try: os.remove(CSV_PATH)
-        except: pass
+        try: 
+            os.remove(CSV_PATH)
+        except Exception: 
+            pass
 
 if __name__ == "__main__":
     print("🚀 Iniciando Pipeline Dimensões (Modo VARCHAR Safe)...")

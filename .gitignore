@@ -3,3 +3,4 @@
 dev.duckdb
 dev.duckdb.wal
 __pycache__
+.ruff_cache

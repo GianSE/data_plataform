@@ -56,7 +56,8 @@ class DBMonitor:
         except Exception as e:
             print(f"\n⚠️ Erro fatal no monitor: {e}")
         finally:
-            if conn: conn.close()
+            if conn: 
+                conn.close()
 
     def start(self, table_name, total_bytes_csv):
         self.stop_event.clear()
