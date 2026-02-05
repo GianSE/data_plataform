@@ -11,7 +11,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir) 
 sys.path.append(parent_dir)
 
-from settings.config import MINIO_CONFIG, setup_minio_env, DUCKDB_SECRET_SQL
+from _settings.config import MINIO_CONFIG, setup_minio_env, DUCKDB_SECRET_SQL
 
 # Configurações conforme seu ambiente na Drogamais
 DB_ACODE = {

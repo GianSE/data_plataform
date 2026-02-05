@@ -2,7 +2,7 @@ import subprocess
 import prefect
 from prefect import task
 
-@task(retries=1, task_run_name="Python: {script_name}")
+@task(retries=3, task_run_name="Python: {script_name}")
 def python_task(script_name: str, python_base_path: str):
     # 1. Pega o logger oficial do Prefect para esta execução
     logger = prefect.get_run_logger() 

@@ -11,7 +11,7 @@ from flows_prefect._shared.deployment import gerenciar_run
 
 PY_PATH = "/app/tasks_python/bronze"
 
-@flow(name="Pipeline Bronze Acode Compras", timeout_seconds=7200)
+@flow(name="Bronze Acode Compras")
 def pipeline():
 
     python_task(
@@ -23,6 +23,7 @@ if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
         entrypoint_name="bronze/flow_bronze_acode_compras.py:pipeline",
-        deploy_name="Pipeline Bronze Acode Compras",
-        cron_schedule="0 4 * * *"
+        deploy_name="Bronze Acode Compras",
+        tags=["MinIO"],
+        cron_schedule="0 2 * * *"
     )

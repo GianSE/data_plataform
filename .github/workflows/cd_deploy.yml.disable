@@ -1,0 +1,26 @@
+name: CD - Deploy Automático em Produção
+
+on:
+  workflow_run:
+    workflows: ["CI - Verificação de Qualidade (Sem Deploy)"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    # Só executa se os testes de qualidade passarem
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: [self-hosted, Windows, drogamais-server] # Roda em todos os runners com essa label
+    strategy:
+      matrix:
+        server: [prod-251, prod-252] # Garante a execução em ambos
+
+    steps:
+      - name: ⬇️ Atualizar Código (Git Pull)
+        uses: actions/checkout@v3
+
+      - name: 🚀 Executar Soft Deploy (Refresh Prefect)
+        shell: pwsh
+        run: |
+          # Como o runner já está na pasta do projeto, basta rodar o refresh
+          python _ops/deploy_all.py

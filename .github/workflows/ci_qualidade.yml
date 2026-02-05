@@ -29,15 +29,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 📦 Instalar Libs Básicas
-        run: pip install prefect pandas sqlalchemy pymysql duckdb python-dotenv polars
-
-      - name: 🔎 Teste 1 - Integridade do Catálogo
+      - name: 📦 Instalar Dependências
         run: |
-          export PYTHONPATH=$PYTHONPATH:pipelines
-          python _ops/check_catalog.py
+          pip install -r prefect-worker/requirements.txt
+          pip install ruff bandit mypy pytest
 
-      - name: 🕵️ Teste 2 - Checagem de Imports
-        run: |
-          # O PYTHONPATH agora é gerenciado internamente pelo script corrigido
-          python _ops/check_imports.py
+      - name: 🕵️ Teste - Checagem de Imports
+        run: python _ops/check_imports.py
+
+      - name: 🎨 Linter e Estilo
+        run: ruff check .
+
+      - name: 🛡️ Auditoria de Segurança
+        run: bandit -r tasks_python/ -x tasks_python/utils/__pycache__

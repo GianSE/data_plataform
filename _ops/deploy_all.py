@@ -2,9 +2,10 @@ import os
 import sys
 import subprocess
 import io
+import hashlib
+import json
 
-# --- ESCUDO PARA TERMINAL (FIX UNICODE/CHARMAP) ---
-# Força o terminal a aceitar UTF-8 mesmo em sessões remotas (WinRM/PowerShell)
+# --- ESCUDO PARA TERMINAL (FIX UNICODE) ---
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
 
@@ -13,87 +14,99 @@ IN_DOCKER = os.path.exists("/.dockerenv")
 INTERNAL_SCRIPT_PATH = "/app/_ops/deploy_all.py"
 
 if not IN_DOCKER:
-    # --- MODO HOST (WINDOWS) ---
-    print("\n[PC] Você está no HOST (Windows).")
-    print("[RUN] Conectando ao container 'prefect_worker' para rodar o deploy...\n")
+    print("\n[PC] Redirecionando para o container do worker...")
     
+    # Busca o ID de qualquer container que venha da imagem do worker e esteja rodando
     try:
-        # Chama o Docker para rodar este mesmo script lá dentro
-        cmd = ["docker", "exec", "-t", "prefect_worker", "python", INTERNAL_SCRIPT_PATH]
-        result = subprocess.run(cmd)
-        
-        if result.returncode == 0:
-            print("\n[OK] Deploy finalizado com sucesso!")
-        else:
-            print("\n[ERRO] Falha ao executar deploy no container.")
-            
-    except FileNotFoundError:
-        print("[ERRO] Comando 'docker' não encontrado.")
-    except KeyboardInterrupt:
-        print("\n[STOP] Interrompido pelo usuário.")
+        container_id = subprocess.run(
+            'docker ps --filter "ancestor=custom-prefect-worker:3.6.13-python3.12" --format "{{.ID}}" ',
+            shell=True, capture_output=True, text=True
+        ).stdout.strip().split('\n')[0]
+
+        if not container_id:
+            raise Exception("Nenhum container do worker encontrado rodando.")
+
+        cmd = ["docker", "exec", "-t", container_id, "python", "/app/_ops/deploy_all.py"]
+        subprocess.run(cmd, check=True)
+    except Exception as e:
+        print(f"\n[ERRO] Falha ao redirecionar: {e}")
     sys.exit(0)
-
 # ==============================================================================
-# MODO CONTAINER (O QUE RODA DE FATO NO PREFECT)
+# MODO CONTAINER: DEPLOY INTELIGENTE (MD5)
 # ==============================================================================
-import importlib
-import inspect
-from prefect import Flow
 
-current_dir = os.path.dirname(os.path.abspath(__file__)) 
-app_root = os.path.dirname(current_dir)
-pipelines_root = os.path.join(app_root, "pipelines")
-flows_prefect_root = os.path.join(pipelines_root, "flows_prefect")
-flows_master_root = os.path.join(pipelines_root, "flows_master")
-tasks_root = os.path.join(app_root, "tasks_python")
+BASE_FLOWS_DIR = "/app/flows_prefect"
+HASH_STORAGE = "/app/_ops/.deploy_hashes.json"
 
-paths_to_add = [app_root, pipelines_root, flows_prefect_root, flows_master_root, tasks_root]
+def get_file_hash(path):
+    """Calcula o MD5 do conteúdo do ficheiro."""
+    hasher = hashlib.md5()
+    with open(path, 'rb') as f:
+        buf = f.read()
+        hasher.update(buf)
+    return hasher.hexdigest()
 
-for p in paths_to_add:
-    if p not in sys.path:
-        sys.path.insert(0, p)
+def load_hashes():
+    if os.path.exists(HASH_STORAGE):
+        with open(HASH_STORAGE, 'r') as f:
+            return json.load(f)
+    return {}
 
-pythonpath_str = ":".join(paths_to_add)
-DIRS_TO_SCAN = ["flows_prefect", "flows_master"]
+def save_hashes(hashes):
+    with open(HASH_STORAGE, 'w') as f:
+        json.dump(hashes, f, indent=4)
 
-def find_and_deploy_flows():
-    print(f"[Container] Varrendo fluxos em: {pipelines_root}")
-    deployment_count = 0
+def find_and_execute_deploys():
+    # Verifica se foi passado o argumento --all para forçar tudo
+    force_all = "--all" in sys.argv
+    
+    print(f"[INFO] [Auto-Deploy] Iniciando varredura em: {BASE_FLOWS_DIR}")
+    if force_all:
+        print("[INFO] Modo --all detectado: Forçando deploy de todos os ficheiros.")
 
-    for directory in DIRS_TO_SCAN:
-        base_path = os.path.join(pipelines_root, directory)
-        if not os.path.exists(base_path): continue
+    current_hashes = load_hashes()
+    new_hashes = {}
+    
+    success_count = 0
+    error_count = 0
+    skipped_count = 0
 
-        for root, _, files in os.walk(base_path):
-            for filename in files:
-                if filename.endswith(".py") and filename != "__init__.py":
-                    try:
-                        rel_dir = os.path.relpath(root, pipelines_root)
-                        module_path = os.path.join(rel_dir, filename).replace(".py", "").replace(os.sep, ".")
-                        module = importlib.import_module(module_path)
-                        
-                        for name, obj in inspect.getmembers(module):
-                            if isinstance(obj, Flow):
-                                if obj.fn.__module__ == module.__name__:
-                                    print(f"Deployando: {obj.name} ({filename})")
-                                    file_rel_path = os.path.join(rel_dir, filename)
-                                    entrypoint_str = f"{file_rel_path}:{name}"
-                                    
-                                    obj.from_source(
-                                        source="/app/pipelines",
-                                        entrypoint=entrypoint_str
-                                    ).deploy(
-                                        name=f"{obj.name}", 
-                                        work_pool_name="process-pool",
-                                        build=False,
-                                        push=False,
-                                        job_variables={"env": {"PYTHONPATH": pythonpath_str}}
-                                    )
-                                    deployment_count += 1
-                    except Exception as e:
-                        print(f"[ERRO] em {filename}: {e}")
+    for root, dirs, files in os.walk(BASE_FLOWS_DIR):
+        if "_shared" in dirs:
+            dirs.remove("_shared") 
+        
+        for filename in files:
+            if filename.startswith("flow_") and filename.endswith(".py"):
+                file_path = os.path.join(root, filename)
+                file_hash = get_file_hash(file_path)
+                
+                # Guarda o hash para a próxima execução
+                new_hashes[filename] = file_hash
 
-    print(f"\n[OK] Total de Flows deployados: {deployment_count}")
+                # Verifica se mudou
+                if not force_all and current_hashes.get(filename) == file_hash:
+                    skipped_count += 1
+                    continue
+
+                print(f"[DEPLOY] Processando: {filename}...", end=" ", flush=True)
+                
+                try:
+                    subprocess.run(
+                        ["python", "-u", file_path, "deploy"],
+                        capture_output=True, text=True, check=True,
+                        env=os.environ.copy()
+                    )
+                    print("OK")
+                    success_count += 1
+                except subprocess.CalledProcessError as e:
+                    print("FALHOU")
+                    print(f"--- ERRO EM {filename} ---\n{e.stderr}\n{'-'*30}")
+                    error_count += 1
+
+    # Atualiza o ficheiro de histórico
+    save_hashes(new_hashes)
+
+    print(f"\n[FIM] Sucessos: {success_count} | Falhas: {error_count} | Ignorados: {skipped_count}")
 
 if __name__ == "__main__":
-    find_and_deploy_flows()
+    find_and_execute_deploys()

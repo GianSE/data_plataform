@@ -1,23 +1,21 @@
-version: "3.9"
 services:
   prefect-worker:
-    build:
-      context: ..
-      dockerfile: prefect-worker/Dockerfile
     image: custom-prefect-worker:3.6.13-python3.12
-    container_name: prefect_worker
+    build:
+      context: ..                       
+      dockerfile: prefect-worker/Dockerfile
     restart: always
     volumes:
       - ../:/app
-    command: >
-      sh -c "sleep 10 && 
-            prefect work-pool create --type process 'process-pool' --overwrite || true && 
-            echo 'Auto-Deploying Flows...' && 
-            python /app/_ops/deploy_all.py && 
-            echo \"Iniciando Worker: $${PREFECT_WORKER_NAME}\" && 
-            echo 'Flows Updated! Starting Worker na Queue default...' && 
-            prefect worker start --pool 'process-pool' --work-queue 'default' --name $${PREFECT_WORKER_NAME} --limit 3"
+    env_file:
+      - .env.worker
     environment:
-      - PYTHONPATH=/app:/app/pipelines:/app/tasks_python
+      - PYTHONPATH=/app:/app/flows_prefect:/app/tasks_python
       - PREFECT_API_URL=http://192.168.21.251:4200/api
-      - PREFECT_WORKER_NAME=${HOSTNAME:-worker-gerado}
+    command: >
+      sh -c "
+        sleep 10 &&
+        prefect work-pool create --type process process-pool --overwrite || true &&
+        python /app/_ops/deploy_all.py &&
+        prefect worker start --pool process-pool --work-queue default --limit 3 --name $${WORKER_NAME}
+      "
