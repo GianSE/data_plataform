@@ -18,14 +18,16 @@ try:
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
     )
     print("   ✅ Ruff e Bandit OK!")
-except:
+except Exception:
     print("   ⚠️  Aviso na instalação do pip.")
 
 # --- 2. CONFIGURAÇÃO DOS HOOKS ---
 print("\n🔄 [2/4] Sincronizando Git Hooks...")
 if not os.path.exists(hooks_dst):
-    try: os.makedirs(hooks_dst)
-    except: pass
+    try: 
+        os.makedirs(hooks_dst)
+    except Exception: 
+        pass
 
 for hook in ["pre-commit", "pre-push"]:
     src = os.path.join(hooks_src, hook)
@@ -35,8 +37,11 @@ for hook in ["pre-commit", "pre-push"]:
         shutil.copy(src, dst)
         print(f"   ✅ {hook} atualizado.")
     elif os.path.exists(dst):
-        try: os.remove(dst); print(f"   🗑️  {hook} removido.")
-        except: pass
+        try: 
+            os.remove(dst) 
+            print(f"   🗑️  {hook} removido.")
+        except Exception: 
+            pass
 
 # --- 3. CONFIGURAÇÃO DO GIT ---
 print("\n⚙️  [3/4] Ajustando Git...")
@@ -44,7 +49,8 @@ try:
     subprocess.run(["git", "config", "core.safecrlf", "false"], check=True)
     subprocess.run(["git", "config", "core.autocrlf", "input"], check=True)
     print("   ✅ Git CRLF OK!")
-except: pass
+except Exception: 
+    pass
 
 # --- 4. CONFIGURAÇÃO DO ALIAS 'WORKER' (MÉTODO SEGURO) ---
 print("\n⌨️  [4/4] Configurando atalho 'worker'...")
