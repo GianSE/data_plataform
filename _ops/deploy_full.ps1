@@ -60,8 +60,9 @@ foreach ($Server in $ListaServidores) {
         # --- ETAPA 1: GIT PULL ---
         Write-Host "`n[$ServerName] [GIT] [1/3] Executando Git Pull..." -ForegroundColor Cyan
         
-        # Usando cmd /c para isolar o git do tratamento de exceção do PowerShell remoto
-        cmd /c "git pull origin main"
+        # 1. Reseta qualquer sujeira local (como o json de hashes)
+        # 2. Puxa o código novo
+        cmd /c "git reset --hard HEAD && git pull origin main"
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[$ServerName] [ERRO] Falha no Git Pull. Verifique conflitos ou credenciais." -ForegroundColor Red
