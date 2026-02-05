@@ -12,6 +12,8 @@ services:
     environment:
       - PYTHONPATH=/app:/app/flows_prefect:/app/tasks_python
       - PREFECT_API_URL=http://192.168.21.251:4200/api
+      # ADICIONE ISTO para os logs ficarem no horário de Brasília
+      - TZ=America/Sao_Paulo              # <--- 
     command: >
       sh -c "
         sleep 10 &&
