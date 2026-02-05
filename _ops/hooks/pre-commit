@@ -1,20 +1,48 @@
-#!/bin/sh
-# Hook pre-commit para validar o catálogo do Prefect
+#!/bin/bash
+echo "🛡️  [Git Hook] Iniciando bateria de testes pré-commit..."
 
-echo "Running static analysis (Catalog Integrity)..."
-
-# Define o caminho raiz do projeto para o Python encontrar os módulos
-# (Assume que você roda o git da raiz do repositório)
-export PYTHONPATH=$PYTHONPATH:./data_plataform/pipelines
-
-# Roda o SEU script de teste de catálogo existente
-python data_plataform/pipelines/flows_master/test_catalog.py
-
-# Captura o resultado (0 = Sucesso, 1 = Erro)
-RESULT=$?
-if [ $RESULT -ne 0 ]; then
- echo "❌ Validação do Catálogo falhou! Commit abortado."
- exit 1
+# --- ETAPA 1: VALIDAR IMPORTS (Integridade) ---
+CHECK_SCRIPT="_ops/check_imports.py"
+if [ -f "$CHECK_SCRIPT" ]; then
+    echo "🔍 [1/3] Verificando Imports..."
+    python "$CHECK_SCRIPT"
+    if [ $? -ne 0 ]; then
+        echo "❌ [FALHA] Erro de importação detectado."
+        echo "   O commit foi bloqueado para não quebrar o projeto."
+        exit 1
+    fi
+else
+    echo "⚠️  Script $CHECK_SCRIPT não encontrado. Pulando etapa 1."
 fi
 
+# --- ETAPA 2: LINTER (Estilo - Ruff) ---
+if command -v ruff &> /dev/null; then
+    echo "🎨 [2/3] Verificando Estilo (Ruff)..."
+    ruff check .
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "❌ [FALHA] O código está 'sujo' ou fora do padrão."
+        echo "   Dica: Rode 'ruff check . --fix' para corrigir automaticamente o que der."
+        exit 1
+    fi
+else
+    # Não bloqueia se o dev não tiver a ferramenta, apenas avisa
+    echo "⚠️  Ruff não instalado. Pulando verificação de estilo."
+fi
+
+# --- ETAPA 3: SEGURANÇA (Bandit) ---
+if command -v bandit &> /dev/null; then
+    echo "🔐 [3/3] Verificando Segurança (Bandit)..."
+    # -r: recursivo | -x: ignora testes/cache | -ll: apenas severidade média/alta
+    bandit -r tasks_python/ -x tasks_python/utils/__pycache__ -ll -q
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "❌ [FALHA] Risco de segurança detectado (Senha exposta ou código vulnerável)."
+        exit 1
+    fi
+else
+    echo "⚠️  Bandit não instalado. Pulando verificação de segurança."
+fi
+
+echo "✅ TUDO LIMPO! Commit autorizado."
 exit 0
