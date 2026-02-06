@@ -2,8 +2,10 @@ import os
 import sys
 import polars as pl
 from datetime import date, timedelta
-from typing import List
-from sqlalchemy.engine import URL
+from typing import List, Set
+import mariadb
+import pyarrow.fs as pafs
+import pyarrow.parquet as pq  # <--- IMPORT NOVO NECESSÁRIO
 
 from _settings.config import MINIO_CONFIG, setup_minio_env
 
@@ -21,157 +23,185 @@ DB_ACODE = {
     "database": "acode_master_redes"
 }
 
-BUCKET_BRONZE = "s3://bronze/compras-acode"
+# IMPORTANTE: Sem 's3://' quando usa filesystem explícito
+BUCKET_BRONZE = "bronze/compras-acode" 
 
 class AcodeBronzeETL:
     def __init__(self):
         setup_minio_env()
         
-        # Cria a URL de forma estruturada e segura
-        connection_url = URL.create(
-            drivername="mariadb+mariadb",  # Driver oficial
-            username=DB_ACODE['user'],
-            password=DB_ACODE['password'],
-            host=DB_ACODE['host'],
-            port=DB_ACODE['port'],
-            database=DB_ACODE['database']
+        # FileSystem Manual (Bypass de erros de Auth do MinIO)
+        self.arrow_fs = pafs.S3FileSystem(
+            access_key="minioadmin",
+            secret_key="minioadmin",
+            endpoint_override="192.168.21.251:9000",
+            scheme="http"
         )
-        
-        # O Polars aceita o objeto URL direto ou convertido para string
-        self.db_uri = connection_url  
-        
-        # Configuração de Storage
-        self.storage_options = {
-            "key": MINIO_CONFIG["access_key"], 
-            "secret": MINIO_CONFIG["secret_key"],
-            "endpoint_url": f"http://{MINIO_CONFIG['endpoint']}",
-        }
+
+    def _get_connection(self):
+        try:
+            return mariadb.connect(
+                user=DB_ACODE["user"],
+                password=DB_ACODE["password"],
+                host=DB_ACODE["host"],
+                port=DB_ACODE["port"],
+                database=DB_ACODE["database"],
+                connect_timeout=10
+            )
+        except mariadb.Error as e:
+            print(f"❌ Erro MariaDB: {e}")
+            return None
 
     def verificar_total_s3(self, data_proc) -> int:
         """
-        Versão 100% Polars: Usa scan_parquet (Lazy) para contar linhas 
-        sem baixar o arquivo inteiro.
+        Lê metadados do Parquet DIRETAMENTE via PyArrow.
+        É muito mais rápido e não confunde o Polars.
         """
         ano, mes, _ = data_proc.split('-')
-        s3_path = f"{BUCKET_BRONZE}/ano={ano}/mes={mes}/{data_proc}.parquet"
+        caminho_arquivo = f"{BUCKET_BRONZE}/ano={ano}/mes={mes}/{data_proc}.parquet"
         
         try:
-            # scan_parquet cria um plano preguiçoso (não lê os dados, só metadados)
-            # select(pl.len()) é extremamente otimizado em parquet
-            q = pl.scan_parquet(
-                s3_path, 
-                storage_options=self.storage_options
-            ).select(pl.len())
-            
-            # collect() executa a query e retorna o número
-            return q.collect().item()
-        except Exception:
-            # Se o arquivo não existe, retorna 0
+            # 1. Verifica se existe
+            info = self.arrow_fs.get_file_info(caminho_arquivo)
+            if info.type == pafs.FileType.NotFound:
+                return 0
+
+            # 2. Lê apenas o cabeçalho do arquivo (Metadata)
+            # Isso retorna instantaneamente sem baixar os dados
+            meta = pq.read_metadata(caminho_arquivo, filesystem=self.arrow_fs)
+            return meta.num_rows
+
+        except Exception as e:
+            # Se for erro de arquivo corrompido ou outro, retorna 0 para forçar reprocessamento
+            # print(f"⚠️ Debug S3 ({caminho_arquivo}): {e}")
             return 0
 
     def obter_total_esperado(self, data_proc) -> int:
-        sql = f"SELECT SUM(Registros) as total FROM si_15_cubo_xml_analitico_diario_totalizador WHERE data_proc = '{data_proc}'"
+        # CAST para garantir match de datas
+        sql = f"SELECT SUM(Registros) as total FROM si_15_cubo_xml_analitico_diario_totalizador WHERE CAST(data_proc AS DATE) = '{data_proc}'"
+        conn = self._get_connection()
+        if not conn: return 0
         try:
-            df = pl.read_database(query=sql, connection=self.db_uri)
+            df = pl.read_database(query=sql, connection=conn)
             total = df["total"].item()
             return int(total) if total is not None else 0
         except Exception:
             return 0
+        finally:
+            conn.close()
 
-    def obter_datas_com_retroativo(self) -> List[date]:
-        print("🔍 Verificando datas na tabela de retroativos...")
-        sql = "SELECT DISTINCT data_proc FROM si_15_cubo_xml_analitico_diario_retroativo WHERE data_proc IS NOT NULL"
+    def obter_datas_retroativas_ativas(self) -> Set[str]:
+        sql = "SELECT DISTINCT CAST(data_proc AS DATE) as data_proc FROM si_15_cubo_xml_analitico_diario_retroativo WHERE data_proc IS NOT NULL"
+        conn = self._get_connection()
+        if not conn: return set()
         try:
-            df = pl.read_database(query=sql, connection=self.db_uri)
-            return df["data_proc"].to_list()
-        except Exception as e:
-            print(f"❌ Erro ao buscar retroativos: {e}")
-            return []
+            df = pl.read_database(query=sql, connection=conn)
+            return set(df["data_proc"].dt.strftime("%Y-%m-%d").to_list())
+        except Exception:
+            return set()
+        finally:
+            conn.close()
 
     def extrair_e_salvar(self, data_proc):
-        print(f"⬇️ Substituindo {data_proc} (Overwrite)...")
-        
-        sql_full = f"""
-            SELECT *, 'DIARIO' as origem_sistema FROM si_15_cubo_xml_analitico_diario WHERE data_proc = '{data_proc}'
-            UNION ALL
-            SELECT *, 'RETROATIVO' as origem_sistema FROM si_15_cubo_xml_analitico_diario_retroativo WHERE data_proc = '{data_proc}'
-        """
-        
+        print(f"⬇️ Baixando {data_proc}...")
+        conn = self._get_connection()
+        if not conn: return
+
         try:
-            df_final = pl.read_database(query=sql_full, connection=self.db_uri)
+            # 1. Tenta Retroativo
+            sql_retro = f"""
+                SELECT *, 'RETROATIVO' as origem_sistema 
+                FROM si_15_cubo_xml_analitico_diario_retroativo 
+                WHERE CAST(data_proc AS DATE) = '{data_proc}'
+            """
+            df_final = pl.read_database(query=sql_retro, connection=conn)
+
+            if not df_final.is_empty():
+                print(f"   ✨ Fonte: RETROATIVO ({df_final.height} linhas).")
+            else:
+                # 2. Tenta Diário
+                sql_diario = f"""
+                    SELECT *, 'DIARIO' as origem_sistema 
+                    FROM si_15_cubo_xml_analitico_diario 
+                    WHERE CAST(data_proc AS DATE) = '{data_proc}'
+                """
+                df_final = pl.read_database(query=sql_diario, connection=conn)
+                
+                if not df_final.is_empty():
+                    print(f"   📦 Fonte: DIÁRIO ({df_final.height} linhas).")
+
         except Exception as e:
-            print(f"❌ Erro ao ler do MariaDB: {e}")
+            print(f"❌ Erro DB: {e}")
             return
+        finally:
+            conn.close()
 
         if df_final.is_empty():
-            print(f"⚠️ {data_proc}: Vazio. Ignorando.")
+            print(f"⚠️ {data_proc}: Vazio no MariaDB.")
             return 
 
-        # Definição do Caminho
+        # Transformação
         ano, mes, _ = data_proc.split('-')
         s3_path = f"{BUCKET_BRONZE}/ano={ano}/mes={mes}/{data_proc}.parquet"
 
-        # Ajustes
         if 'data_emissao' in df_final.columns:
             df_final = df_final.with_columns(pl.col('data_emissao').cast(pl.Date, strict=False))
-
         if 'data_proc' in df_final.columns:
             df_final = df_final.drop(['data_proc'])
 
+        # Carga Blindada
         try:
-            # Escrita com as mesmas storage_options definidas no __init__
-            df_final.write_parquet(
-                s3_path, 
-                compression='snappy', 
-                use_pyarrow=True, 
-                pyarrow_options={"storage_options": self.storage_options}
-            )
-            print(f"✅ {data_proc} salvo: {s3_path} ({df_final.height} linhas)")
+            # Abriremos um "tubo" direto no sistema de arquivos
+            # Isso evita que o Polars tente adivinhar configurações do S3
+            with self.arrow_fs.open_output_stream(s3_path) as f:
+                df_final.write_parquet(
+                    f, 
+                    compression='snappy', 
+                    use_pyarrow=True
+                )
+            print(f"✅ Salvo: {s3_path}")
         except Exception as e:
-            print(f"❌ Erro ao salvar no MinIO: {e}")
+            print(f"❌ Erro Salvar S3: {e}")
+
+    def processar_dia(self, str_dia):
+        qtd_remota = self.obter_total_esperado(str_dia)
+        qtd_s3 = self.verificar_total_s3(str_dia) 
+        
+        print(f"   📊 {str_dia} -> MariaDB: {qtd_remota} | S3: {qtd_s3}")
+
+        if qtd_s3 != qtd_remota:
+            print(f"   🔄 Divergência! Atualizando...")
+            self.extrair_e_salvar(str_dia)
+        else:
+            print(f"   👍 OK.")
 
     def run(self):
-        print("🚀 Sincronização Bronze (Pure Polars)...")
+        print("🚀 Sincronização Bronze (PyArrow Nativo)...")
         
-        # Lógica de Loop mantida igual...
-        print("📅 [CHECK RECENTE] Verificando últimos 7 dias...")
-        datas_recentes = []
+        # FASE 1
+        print("\n📅 [FASE 1] Últimos 7 dias...")
+        ultimos_dias = set()
         for i in range(1, 8):
-            datas_recentes.append(date.today() - timedelta(days=i))
-            
-        for data_alvo in sorted(datas_recentes, reverse=True):
-            str_dia = data_alvo.strftime('%Y-%m-%d')
-            qtd_remota = self.obter_total_esperado(str_dia)
-            qtd_s3 = self.verificar_total_s3(str_dia) # Agora usa Polars Scan
-            
-            print(f"   📊 {str_dia} -> MariaDB: {qtd_remota} | S3: {qtd_s3}")
+            d = (date.today() - timedelta(days=i)).strftime('%Y-%m-%d')
+            ultimos_dias.add(d)
+        
+        for str_dia in sorted(list(ultimos_dias), reverse=True):
+            self.processar_dia(str_dia)
 
-            if qtd_s3 != qtd_remota:
-                print(f"   🔄 Divergência em {str_dia}. Atualizando...")
-                self.extrair_e_salvar(str_dia)
-            else:
-                print(f"   👍 {str_dia} OK.")
-
-        # 2. RETROATIVOS
-        datas_retro = self.obter_datas_com_retroativo()
+        # FASE 2
+        print("\n📅 [FASE 2] Pendências Retroativas...")
+        datas_retro = self.obter_datas_retroativas_ativas()
+        
         if datas_retro:
-            print("\n📅 [CHECK RETROATIVOS]...")
-            str_recentes = [d.strftime('%Y-%m-%d') for d in datas_recentes]
-
-            for data_alvo in sorted(datas_retro, reverse=True):
-                str_dia = str(data_alvo)
-                if str_dia in str_recentes: continue
-
-                qtd_remota = self.obter_total_esperado(str_dia)
-                qtd_s3 = self.verificar_total_s3(str_dia)
-
-                print(f"   📊 {str_dia} -> MariaDB: {qtd_remota} | S3: {qtd_s3}")
-
-                if qtd_s3 != qtd_remota:
-                    print(f"   🔄 [RETRO] Atualizando {str_dia}...")
-                    self.extrair_e_salvar(str_dia)
-                else:
-                    print(f"   👍 {str_dia} OK.")
+            datas_para_processar = datas_retro - ultimos_dias
+            if datas_para_processar:
+                print(f"   🔍 Processando {len(datas_para_processar)} dias antigos...")
+                for str_dia in sorted(list(datas_para_processar), reverse=True):
+                    self.processar_dia(str_dia)
+            else:
+                print("   ℹ️ Retroativos já atualizados.")
+        else:
+            print("   ℹ️ Sem retroativos.")
         
         print("\n🏁 Fim.")
 
