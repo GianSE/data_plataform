@@ -44,6 +44,9 @@ jobs:
         env:
           SECRET_CONTENT: ${{ secrets.ENV_MAIN_CONTENT }}
 
-      - name: 🚀 Executar Deploy Runner
-        shell: pwsh
-        run: .\_ops\deploy_runner.ps1
+      - name: 🚀 Executar Deploy Runner(Self-Hosted Runners)
+        # Trocado de 'pwsh' para 'powershell' para compatibilidade nativa com Windows
+        shell: powershell 
+        run: |
+          Write-Host "Iniciando script de deploy local..."
+          .\_ops\deploy_runner.ps1
