@@ -11,11 +11,25 @@ import shutil   # <--- Adicione este import
 # Isso cria uma pasta vazia temporária e obriga o Docker a usá-la como config.
 # Assim, ele ignora o cofre de senhas do Windows que causa o erro "sessão de logon".
 try:
+    # 1. Cria pasta temporária
     fake_config_dir = tempfile.mkdtemp()
+    
+    # 2. Cria o arquivo config.json que DESATIVA o cofre de senhas
+    config_path = os.path.join(fake_config_dir, "config.json")
+    with open(config_path, "w") as f:
+        json.dump({
+            "credsStore": "",       # Desativa wincred/desktop
+            "credsHelpers": {},     # Desativa auxiliares
+            "auths": {}             # Garante lista limpa
+        }, f)
+
+    # 3. Força o Docker a usar essa pasta como config
     os.environ["DOCKER_CONFIG"] = fake_config_dir
-    print(f"[FIX] Bypass de credenciais ativado. Config limpa em: {fake_config_dir}")
+    
+    print(f"[FIX] Bypass ativado. Usando config segura em: {config_path}")
+
 except Exception as e:
-    print(f"[WARN] Não foi possível criar config temporária: {e}")
+    print(f"[WARN] Falha ao aplicar bypass Docker: {e}")
 
 # Tempo que espera até matar o container em segudos 300 = 5min
 # None = Infinito
