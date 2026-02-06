@@ -4,6 +4,18 @@ import sys
 import os
 import hashlib
 import json
+import tempfile # <--- Adicione este import se não tiver
+import shutil   # <--- Adicione este import
+
+# --- [FIX CRÍTICO] BYPASS DE CREDENCIAIS WINDOWS ---
+# Isso cria uma pasta vazia temporária e obriga o Docker a usá-la como config.
+# Assim, ele ignora o cofre de senhas do Windows que causa o erro "sessão de logon".
+try:
+    fake_config_dir = tempfile.mkdtemp()
+    os.environ["DOCKER_CONFIG"] = fake_config_dir
+    print(f"[FIX] Bypass de credenciais ativado. Config limpa em: {fake_config_dir}")
+except Exception as e:
+    print(f"[WARN] Não foi possível criar config temporária: {e}")
 
 # Tempo que espera até matar o container em segudos 300 = 5min
 # None = Infinito
