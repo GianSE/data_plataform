@@ -7,6 +7,7 @@ services:
     restart: always
     volumes:
       - ../:/app
+      - C:/deploy_metadata:/app/_metadata
     env_file:
       - .env.worker
     environment:
