@@ -120,7 +120,7 @@ def csv_mariadb():
         LOAD DATA LOCAL INFILE '{CSV_PATH}'
         INTO TABLE {table_new}
         FIELDS TERMINATED BY ';' LINES TERMINATED BY '\\n'
-        (id_produto, id_marca, fornecedor_cnpj, id_fabricante, id_grupo_subclasse, 
+        (id_produto, id_marca, id_fornecedor, id_fabricante, id_grupo_subclasse, 
          loja_cnpj, Ano_Mes, acode_val_total, qtd_trib, data_atualizacao)
         """
         cursor.execute(sql_load)
@@ -139,7 +139,7 @@ def csv_mariadb():
         ALTER TABLE {table_new}
             ADD INDEX idx_produto (id_produto),
             ADD INDEX idx_marca (id_marca),
-            ADD INDEX idx_fornecedor_cnpj (fornecedor_cnpj),
+            ADD INDEX idx_id_fornecedor (id_fornecedor),
             ADD INDEX idx_fabricante (id_fabricante),
             ADD INDEX idx_grupo_subclasse (id_grupo_subclasse),
             ADD INDEX idx_loja_cnpj (loja_cnpj),
