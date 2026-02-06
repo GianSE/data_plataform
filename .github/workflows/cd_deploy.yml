@@ -24,23 +24,27 @@ jobs:
         uses: actions/checkout@v3
 
       - name: 🔐 Injetar Configurações (Secrets + IP Dinâmico)
-        shell: pwsh
+        shell: powershell # Alterado de pwsh para powershell
         run: |
           # 1. Garante as pastas
-          New-Item -ItemType Directory -Force -Path "tasks_python/_settings"
+          if (!(Test-Path "tasks_python/_settings")) {
+              New-Item -ItemType Directory -Force -Path "tasks_python/_settings"
+          }
           
           # 2. Injeta o .env principal (Secrets do GitHub)
-          $env:SECRET_CONTENT | Out-File -FilePath "tasks_python/_settings/.env" -Encoding utf8
+          # Usando [System.IO.File]::WriteAllText para garantir o encoding correto sem BOM
+          [System.IO.File]::WriteAllText("$PWD/tasks_python/_settings/.env", $env:SECRET_CONTENT)
           
-          # 3. Captura o IP da máquina (Filtra pelo range 192.168.*)
+          # 3. Captura o IP da máquina (Filtra pelo range 192.168.21.*)
           $IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like "192.168.21.*" } | Select-Object -First 1).IPAddress
           
-          if (-not $IP) { $IP = $env:COMPUTERNAME } # Fallback para hostname se o IP falhar
+          if (-not $IP) { $IP = $env:COMPUTERNAME } # Fallback para hostname
           
           # 4. Cria o .env.worker com o IP
-          "WORKER_NAME=worker-$IP" | Out-File -FilePath "prefect-worker/.env.worker" -Encoding utf8
+          $WorkerContent = "WORKER_NAME=worker-$IP"
+          [System.IO.File]::WriteAllText("$PWD/prefect-worker/.env.worker", $WorkerContent)
           
-          Write-Host "✅ Configurações injetadas para o worker-$IP"
+          Write-Host "✅ Configuracoes injetadas para o worker-$IP"
         env:
           SECRET_CONTENT: ${{ secrets.ENV_MAIN_CONTENT }}
 
