@@ -8,13 +8,13 @@ $ListaServidores = @(
         Nome   = "Servidor Principal (.251)"
         IP     = "192.168.21.251"
         User   = "altaneiro.ti02"
-        Path   = "C:\App\Docker\data_plataform"
+        Path   = "C:\actions-runner\_work\data_plataform\data_plataform"
     },
     @{
         Nome   = "Servidor Secundário (.252)"
         IP     = "192.168.21.252"
         User   = "apf.ti02"
-        Path   = "C:\Docker\data_plataform"
+        Path   = "C:\actions-runner\_work\data_plataform\data_plataform"
     }
 )
 
