@@ -23,9 +23,27 @@ jobs:
       - name: ⬇️ Checkout do Código
         uses: actions/checkout@v3
 
-      - name: 🚀 Executar Deploy Runner(Self-Hosted Runners)
-        # Trocado de 'pwsh' para 'powershell' para compatibilidade nativa com Windows
-        shell: powershell 
+      - name: 🔐 Injetar Configurações (Secrets + IP Dinâmico)
+        shell: pwsh
         run: |
-          Write-Host "Iniciando script de deploy local..."
-          .\_ops\deploy_runner.ps1
+          # 1. Garante as pastas
+          New-Item -ItemType Directory -Force -Path "tasks_python/_settings"
+          
+          # 2. Injeta o .env principal (Secrets do GitHub)
+          $env:SECRET_CONTENT | Out-File -FilePath "tasks_python/_settings/.env" -Encoding utf8
+          
+          # 3. Captura o IP da máquina (Filtra pelo range 192.168.*)
+          $IP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -like "192.168.21.*" } | Select-Object -First 1).IPAddress
+          
+          if (-not $IP) { $IP = $env:COMPUTERNAME } # Fallback para hostname se o IP falhar
+          
+          # 4. Cria o .env.worker com o IP
+          "WORKER_NAME=worker-$IP" | Out-File -FilePath "prefect-worker/.env.worker" -Encoding utf8
+          
+          Write-Host "✅ Configurações injetadas para o worker-$IP"
+        env:
+          SECRET_CONTENT: ${{ secrets.ENV_MAIN_CONTENT }}
+
+      - name: 🚀 Executar Deploy Runner
+        shell: pwsh
+        run: .\_ops\deploy_runner.ps1
