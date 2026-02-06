@@ -1,0 +1,33 @@
+name: CD - Deploy Automático em Produção
+
+on:
+  workflow_run:
+    workflows: ["CI - Verificação de Qualidade (Sem Deploy)"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    # Só roda se o CI passou
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    name: Deploy em ${{ matrix.server }}
+    runs-on: [self-hosted, Windows, "${{ matrix.server }}"]
+    
+    strategy:
+      matrix:
+        # IMPORTANTE: Você precisa ter instalado os runners nos PCs .251 e .252
+        # e ter adicionado essas LABELS neles durante a config.
+        server: [server-251, server-252]
+
+    steps:
+      # 1. O Github Runner baixa o código atualizado para a pasta dele
+      # (Substitui o "git pull" manual do seu script antigo)
+      - name: ⬇️ Checkout do Código
+        uses: actions/checkout@v3
+
+      # 2. Executa o script Runner que criamos acima
+      - name: 🚀 Executar Deploy Runner(Self-Hosted Runners)
+        shell: pwsh
+        run: |
+          Write-Host "Executando script de deploy Self-Hosted Runners..."
+          .\_ops\deploy_runner.ps1

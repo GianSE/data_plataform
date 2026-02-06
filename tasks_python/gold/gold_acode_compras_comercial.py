@@ -32,6 +32,12 @@ def duckdb_csv():
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(DUCKDB_SECRET_SQL)
 
+        # --- CONFIGURAÇÕES CORRETAS PARA EVITAR O ERRO DE CAST/BUFFER ---
+        con.execute("SET http_keep_alive=false;") # Evita problemas com conexões persistentes no MinIO
+        con.execute("SET preserve_insertion_order=false;") 
+        con.execute("PRAGMA disable_object_cache;") # Importante para evitar o erro de ponteiro negativo
+        # --------------------------------------------------------------
+
         print("🦆 DuckDB: Extraindo dados e gerando CSV...")
         
         # --- MUDANÇA PRINCIPAL: IDs convertidos para VARCHAR (Texto) ---

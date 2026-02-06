@@ -17,7 +17,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # 3. Atualização dos Flows no Prefect
 Write-Host "`n🌊 [FLOWS] Registrando deployments..." -ForegroundColor Yellow
-python .\_ops\rebumasild_deployments.py
+python .\_ops\rebuild_deployments.py
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ [ERRO] Falha ao registrar flows." -ForegroundColor Red

@@ -21,7 +21,7 @@ class DBMonitor:
             while not self.stop_event.is_set():
                 try:
                     # Verifica conexão
-                    conn.ping(reconnect=True)
+                    conn.ping()
                     
                     sql = f"""
                     SELECT data_length, table_rows 
