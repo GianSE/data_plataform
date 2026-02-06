@@ -6,9 +6,14 @@ import hashlib
 import json
 import tempfile
 import shutil
-import ctypes # <--- Importante para corrigir o caminho do Windows
+import ctypes
 
-# --- [FIX CRÍTICO V3] CORREÇÃO DE CAMINHO CURTO E BYPASS ---
+# --- [FIX CRÍTICO V4] BYPASS COMPLETO (CONFIG + LEGACY BUILD) ---
+
+# 1. Desativa o BuildKit (O culpado por ignorar a config e pedir senha)
+# Isso força o Docker a usar o construtor antigo, que é mais compatível com scripts remotos
+os.environ["DOCKER_BUILDKIT"] = "0"
+os.environ["COMPOSE_DOCKER_CLI_BUILD"] = "0"
 
 def get_long_path(path):
     """Converte caminhos 'curtos' do Windows (User~1) para caminhos reais."""
@@ -20,12 +25,11 @@ def get_long_path(path):
     except Exception:
         return path
 
-# 1. Cria pasta temporária
+# 2. Cria pasta temporária para Config Limpa
 fake_config_dir_raw = tempfile.mkdtemp()
-# 2. Converte para caminho longo (Remove o APFTI0~1 que quebra o Docker)
 fake_config_dir = get_long_path(fake_config_dir_raw)
 
-# 3. Cria o config.json
+# 3. Cria o config.json que proíbe o uso de cofres de senha
 config_path = os.path.join(fake_config_dir, "config.json")
 try:
     with open(config_path, "w") as f:
@@ -35,22 +39,20 @@ try:
             "auths": {}             # Limpa auths
         }, f)
     
-    # 4. Define no ambiente (Cinto)
+    # 4. Define no ambiente
     os.environ["DOCKER_CONFIG"] = fake_config_dir
     
-    # 5. Cria o prefixo do comando (Suspensório)
-    # Vamos injetar isso em todo comando docker para OBRIGAR o uso
+    # 5. Define o prefixo do comando
     DOCKER_CMD = f'docker --config "{fake_config_dir}"'
     
-    print(f"[FIX] Bypass ativado. Path corrigido: {fake_config_dir}")
+    print(f"[FIX] Bypass ativado. BuildKit Desligado. Path: {fake_config_dir}")
 
 except Exception as e:
     print(f"[WARN] Falha ao configurar bypass: {e}")
-    DOCKER_CMD = "docker" # Fallback
+    DOCKER_CMD = "docker"
 
 # -----------------------------------------------------------
 
-# Tempo de drenagem
 TIMEOUT_DRAIN = 300
 
 # --- CONFIGURAÇÃO DE CAMINHOS ---
@@ -100,7 +102,7 @@ def save_new_hashes(hashes):
 
 def run_command(command, description):
     print(f"[EXEC] {description}...")
-    # Passamos env=os.environ explicitamente para garantir que o Child Process pegue o DOCKER_CONFIG
+    # Passamos env=os.environ explicitamente
     result = subprocess.run(command, shell=True, capture_output=False, env=os.environ)
     
     if result.returncode != 0:
@@ -109,7 +111,6 @@ def run_command(command, description):
     return True
 
 def graceful_drain(color, timeout=None):
-    # Usa o prefixo DOCKER_CMD para garantir que o 'docker ps' funcione também
     try:
         cmd_find = f'{DOCKER_CMD} ps --filter "name=worker-{color}" -q'
         ids = subprocess.run(cmd_find, shell=True, capture_output=True, text=True, env=os.environ).stdout.strip().split('\n')
@@ -122,7 +123,6 @@ def graceful_drain(color, timeout=None):
         return
 
     print(f"[STOP] Enviando SIGTERM para infraestrutura antiga ({color})...")
-    # Usa o prefixo DOCKER_CMD
     subprocess.run(f"{DOCKER_CMD} kill --signal=SIGTERM {' '.join(ids)}", shell=True, env=os.environ)
 
     print(f"[WAIT] Aguardando jobs pendentes no '{color}' finalizarem...")
@@ -134,7 +134,6 @@ def graceful_drain(color, timeout=None):
 
     start_time = time.time()
     while True:
-        # Usa o prefixo DOCKER_CMD
         check_cmd = f'{DOCKER_CMD} ps --filter "name=worker-{color}" -q'
         remaining = subprocess.run(check_cmd, shell=True, capture_output=True, text=True, env=os.environ).stdout.strip()
 
@@ -156,7 +155,6 @@ def rebuild_blue_green():
 
     needs_build, new_hashes = check_if_build_needed()
 
-    # Usa o prefixo DOCKER_CMD
     check_any_worker = subprocess.run(
         f'{DOCKER_CMD} ps --filter "name=worker-" -q', 
         shell=True, capture_output=True, text=True, env=os.environ
@@ -176,7 +174,6 @@ def rebuild_blue_green():
 
     is_blue_active = False
     try:
-        # Usa o prefixo DOCKER_CMD
         check_blue = subprocess.run(
             f'{DOCKER_CMD} ps --filter "name=worker-blue" -q', 
             shell=True, capture_output=True, text=True, env=os.environ
@@ -195,8 +192,22 @@ def rebuild_blue_green():
     if needs_build:
         print(f"[BUILD] Mudanças detectadas. Iniciando Build do {new_color}...")
         
-        # --- AQUI ESTÁ O TRUQUE: Injetamos DOCKER_CMD antes do 'compose' ---
-        # Isso vira: "docker --config 'C:\Users\...' compose -p ..."
+        # --- TENTATIVA DE PRE-PULL MANUAL (Segurança Extra) ---
+        # Tenta puxar a imagem base manualmente ANTES do build, pois o 'docker pull'
+        # obedece melhor a config que o 'docker build'.
+        # (Isso assume que a imagem base é publica e não precisa de login)
+        try:
+             # Lendo Dockerfile para achar a imagem base
+             with open("Dockerfile", "r") as df:
+                 for line in df:
+                     if line.strip().startswith("FROM"):
+                         base_image = line.split()[1]
+                         print(f"[PRE-PULL] Garantindo imagem base: {base_image}")
+                         subprocess.run(f"{DOCKER_CMD} pull {base_image}", shell=True, env=os.environ)
+                         break
+        except Exception:
+            pass # Se falhar, deixa o build tentar
+
         cmd_build = f"{DOCKER_CMD} compose -p worker-{new_color} build --no-cache"
         
         if not run_command(cmd_build, f"Construindo imagem worker-{new_color}"):
@@ -204,7 +215,7 @@ def rebuild_blue_green():
     else:
         print("[SKIP] Nenhuma mudança nas dependências. Usando imagem em cache.")
 
-    # Sobe a nova stack usando o prefixo DOCKER_CMD
+    # Sobe a nova stack
     cmd_up = f"{DOCKER_CMD} compose -p worker-{new_color} up -d --remove-orphans"
     success = run_command(cmd_up, f"Subindo worker-{new_color}")
     if not success:
@@ -216,17 +227,13 @@ def rebuild_blue_green():
     print("[WAIT] Aguardando 15 segundos para o novo worker estabilizar...")
     time.sleep(15)
 
-    # 6. Drenagem e Remoção do Antigo
     if current_color:
         graceful_drain(current_color, timeout=TIMEOUT_DRAIN)
-
         print(f"[CLEAN] Removendo stack antiga ({current_color})...")
-        # Usa o prefixo DOCKER_CMD
         run_command(f"{DOCKER_CMD} compose -p worker-{current_color} down", "Limpando recursos antigos")
 
     if needs_build:
         print("[CLEAN] Limpando imagens antigas (dangling)...")
-        # Usa o prefixo DOCKER_CMD
         subprocess.run(f"{DOCKER_CMD} image prune -f", shell=True, capture_output=True, env=os.environ)
 
     print(f"[OK] Sucesso! Apenas Worker ({new_color}) está ativo.")
