@@ -1,7 +1,8 @@
 import polars as pl
 import urllib.parse
 import s3fs
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, URL
+from _settings.config import setup_minio_env
 
 # 1. Configurações
 DB_CONFIG = {
@@ -19,41 +20,53 @@ MINIO_CONFIG = {
     "bucket": "bronze"
 }
 
-password_safe = urllib.parse.quote_plus(DB_CONFIG["password"])
-db_uri = f"mysql+pymysql://{DB_CONFIG['user']}:{password_safe}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
-
 def extrair_dados_acode_otimizado():
-    fs = s3fs.S3FileSystem(
-        key=MINIO_CONFIG["access_key"],
-        secret=MINIO_CONFIG["secret_key"],
-        endpoint_url=MINIO_CONFIG["endpoint"]
+    setup_minio_env()
+    
+    # URL Segura e Moderna (MariaDB Connector)
+    connection_url = URL.create(
+        drivername="mariadb+mariadb", 
+        username=DB_CONFIG['user'], # Fallback para o hardcoded se precisar
+        password=DB_CONFIG['password'],
+        host=DB_CONFIG['host'],
+        port=DB_CONFIG['port'],
+        database=DB_CONFIG['database']
     )
     
-    target_folder = f"{MINIO_CONFIG['bucket']}/compras-acode"
-    engine = create_engine(db_uri)
+    # Config do MinIO para o Polars
+    storage_options = {
+        "key": MINIO_CONFIG["access_key"],
+        "secret": MINIO_CONFIG["secret_key"],
+        "endpoint_url": f"http://{MINIO_CONFIG['endpoint']}",
+    }
 
-    # PASSO 1: Pegar todas as datas únicas de processamento
+    target_bucket = f"s3://{MINIO_CONFIG['bucket']}/compras-acode"
+
     print("🔍 Consultando datas disponíveis no MariaDB...")
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT DISTINCT CAST(data_proc AS DATE) as dt FROM dw_tb_acode_temp WHERE data_proc IS NOT NULL ORDER BY dt"))
-        datas = [row[0] for row in result]
     
+    # PASSO 1: Pegar datas (Usando Polars direto, sem criar engine na mão)
+    try:
+        q_datas = "SELECT DISTINCT CAST(data_proc AS DATE) as dt FROM dw_tb_acode_temp WHERE data_proc IS NOT NULL ORDER BY dt"
+        df_datas = pl.read_database(query=q_datas, connection=connection_url)
+        datas = df_datas["dt"].to_list()
+    except Exception as e:
+        print(f"❌ Erro ao conectar no banco: {e}")
+        return
+
     if not datas:
         print("⚠️ Nenhuma data encontrada para processar.")
         return
 
     print(f"📅 Processando {len(datas)} dias de dados...")
 
-    # PASSO 2: Iterar por data, lendo e subindo um arquivo por dia dentro da pasta do mês
+    # PASSO 2: Loop de Extração
     for data in datas:
-        ano = data.year
-        mes = f"{data.month:02d}"
-        
-        # O arquivo leva o nome da data completa para não sobrescrever outros dias do mesmo mês
-        s3_path = f"{target_folder}/ano={ano}/mes={mes}/{data}.parquet"
+        # Garante que data é objeto date (se vier datetime)
+        str_data = str(data) # YYYY-MM-DD
+        ano, mes, _ = str_data.split('-')
 
-        # Se o arquivo já existir, podemos pular (opcional, para ser mais rápido em re-execuções)
-        # if fs.exists(s3_path): continue
+        # Caminho Limpo (Hive Style)
+        s3_path = f"{target_bucket}/ano={ano}/mes={mes}/{str_data}.parquet"
 
         query_dia = f"""
             SELECT 
@@ -68,16 +81,27 @@ def extrair_dados_acode_otimizado():
                 Impostos, Outros, Val_Prod_sem_STRet, EAN, Bandeira, PBM, 
                 data_emissao, data_proc, item_numero, idpk, Ultima_Atualizacao
             FROM dw_tb_acode_temp
-            WHERE CAST(data_proc AS DATE) = '{data}'
+            WHERE CAST(data_proc AS DATE) = '{str_data}'
         """
         
-        # Lê do banco e já converte
-        df_dia = pl.read_database(query=query_dia, connection=engine)
-        
-        if not df_dia.is_empty():
-            with fs.open(s3_path, mode='wb') as f:
-                df_dia.write_parquet(f, compression="snappy")
-            print(f"✅ Sincronizado: {s3_path} | {df_dia.height} linhas")
+        try:
+            # Lê com Polars (usa o driver mariadb rápido)
+            df_dia = pl.read_database(query=query_dia, connection=connection_url)
+            
+            if not df_dia.is_empty():
+                # Escreve direto pro S3 (sem abrir 'with fs.open')
+                df_dia.write_parquet(
+                    s3_path, 
+                    compression="snappy",
+                    use_pyarrow=True,
+                    pyarrow_options={"storage_options": storage_options}
+                )
+                print(f"✅ Sincronizado: {s3_path} | {df_dia.height} linhas")
+            else:
+                print(f"⚠️ {str_data}: Dia vazio.")
+                
+        except Exception as e:
+            print(f"❌ Erro ao processar dia {str_data}: {e}")
 
     print("\n🏁 Bronze atualizada com sucesso!")
 

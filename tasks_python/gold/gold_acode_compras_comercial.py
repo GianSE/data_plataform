@@ -1,5 +1,5 @@
 import duckdb
-import pymysql
+import mariadb
 import os
 import tempfile
 import sys
@@ -72,7 +72,7 @@ def csv_mariadb():
 
     conn = None
     try:
-        conn = pymysql.connect(**DB_CONFIG)
+        conn = mariadb.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
         table_prod = "gold_acode_compras_produto_comercial"

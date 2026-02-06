@@ -12,12 +12,9 @@ services:
     environment:
       - PYTHONPATH=/app:/app/flows_prefect:/app/tasks_python
       - PREFECT_API_URL=http://192.168.21.251:4200/api
-      # ADICIONE ISTO para os logs ficarem no horário de Brasília
-      - TZ=America/Sao_Paulo              # <--- 
+      - TZ=America/Sao_Paulo
+      - PREFECT_WORKER_HEARTBEAT_SECONDS=15
     command: >
       sh -c "
-        sleep 10 &&
-        prefect work-pool create --type process process-pool --overwrite || true &&
-        python /app/_ops/deploy_all.py &&
         prefect worker start --pool process-pool --work-queue default --limit 3 --name $${WORKER_NAME}
       "

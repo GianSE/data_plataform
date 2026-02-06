@@ -1,5 +1,5 @@
 import duckdb
-import pymysql
+import mariadb
 import os
 import sys
 from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
@@ -112,7 +112,7 @@ def csv_mariadb(config, CSV_PATH):
     
     conn = None
     try:
-        conn = pymysql.connect(**DB_CONFIG)
+        conn = mariadb.connect(**DB_CONFIG)
         cursor = conn.cursor()
         
         cursor.execute(f"DROP TABLE IF EXISTS {table_new}")

@@ -1,6 +1,6 @@
 import time
 import threading
-import pymysql
+import mariadb
 
 class DBMonitor:
     def __init__(self, db_config):
@@ -12,7 +12,7 @@ class DBMonitor:
         conn = None
         try:
             # 1. Conecta UMA vez antes do loop
-            conn = pymysql.connect(**self.db_config)
+            conn = mariadb.connect(**self.db_config)
             cursor = conn.cursor()
             print(f"\n📊 Monitor iniciado para tabela: {table_name}")
             

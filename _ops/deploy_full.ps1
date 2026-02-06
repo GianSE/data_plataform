@@ -67,11 +67,12 @@ foreach ($Server in $ListaServidores) {
         Set-Location $Path
 
         # --- ETAPA 1: GIT PULL ---
-        Write-Host "`n[$ServerName] [GIT] [1/3] Executando Git Pull..." -ForegroundColor Cyan
+        Write-Host "`n[$ServerName] [GIT] [1/3] Garantindo Branch Main e Executando Pull..." -ForegroundColor Cyan
         
-        # 1. Reseta qualquer sujeira local (como o json de hashes)
-        # 2. Puxa o código novo
-        cmd /c "git reset --hard HEAD && git pull origin main"
+        # 1. Força a mudança para a main (caso alguém tenha mudado no servidor)
+        # 2. Reseta para o estado limpo
+        # 3. Puxa o código da main
+        cmd /c "git checkout main && git reset --hard origin/main && git pull origin main"
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[$ServerName] [ERRO] Falha no Git Pull. Verifique conflitos ou credenciais." -ForegroundColor Red
@@ -93,7 +94,7 @@ foreach ($Server in $ListaServidores) {
         # --- ETAPA 3: DEPLOY ALL ---
         Write-Host "`n[$ServerName] [FLOWS] [3/3] Registrando Flows (Deploy All)..." -ForegroundColor Cyan
         
-        cmd /c "python .\_ops\deploy_all.py"
+        cmd /c "python .\_ops\rebuild_deployments.py"
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[$ServerName] [ERRO] Falha ao registrar flows." -ForegroundColor Red

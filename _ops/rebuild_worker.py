@@ -5,6 +5,10 @@ import os
 import hashlib
 import json
 
+# Tempo que espera até matar o container em segudos 300 = 5min
+# None = Infinito
+TIMEOUT_DRAIN = 300
+
 # --- CONFIGURAÇÃO DE CAMINHOS ---
 # Usa caminho absoluto para evitar erros de "file not found"
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +21,6 @@ FILES_TO_MONITOR = [
 ]
 
 HASH_STORAGE = os.path.join(current_dir, ".requirements_hashes.json")
-
 # --- FUNÇÕES UTILITÁRIAS ---
 
 def get_file_hash(path):
@@ -92,9 +95,10 @@ def graceful_drain(color, timeout=None):
     # 3. Loop de Espera
     print(f"[WAIT] Aguardando jobs pendentes no '{color}' finalizarem...")
     if timeout:
-        print(f"       (Timeout: {timeout}s)")
+        print(f"(Timeout: {timeout}s)")
     else:
-        print("       (Modo Infinito: O script aguardará até o fim dos jobs)")
+        tempo_minutos = TIMEOUT_DRAIN / 60
+        print(f"(Modo SIGTERM: O script aguardará {tempo_minutos} minutos até o fim dos jobs)")
 
     start_time = time.time()
     while True:
@@ -116,17 +120,33 @@ def graceful_drain(color, timeout=None):
 # --- FUNÇÃO PRINCIPAL ---
 
 def rebuild_blue_green():
-    # Caminho do Docker Compose (ajusta dependendo de onde roda)
     docker_dir = os.path.join(project_root, "prefect-worker")
-    if not os.path.exists(docker_dir):
-        # Fallback caso a pasta se chame apenas 'prefect'
-        docker_dir = os.path.join(project_root, "prefect") 
-    
     os.chdir(docker_dir)
 
     # 1. Verifica Inteligência (Hashes)
     needs_build, new_hashes = check_if_build_needed()
     
+    # --- NOVA LÓGICA DE INTELIGÊNCIA BLINDADA ---
+    # 1. Verifica se houve mudança nos arquivos
+    needs_build, new_hashes = check_if_build_needed()
+
+    # 2. Verifica se existe ALGUM worker rodando (Independente da cor)
+    check_any_worker = subprocess.run(
+        'docker ps --filter "name=worker-" -q', 
+        shell=True, capture_output=True, text=True
+    ).stdout.strip()
+
+    # 3. Decisão: Só dá SKIP se não mudou nada E se já tem alguém trabalhando
+    if not needs_build and "--force" not in sys.argv and check_any_worker:
+        print("[SKIP] Nenhuma mudança detectada no requirements.txt ou Dockerfile.")
+        print("[SKIP] O worker atual já está rodando. Mantendo execução para evitar crash.")
+        sys.exit(0)
+
+    # Se chegou aqui, ou teve mudança, ou o force foi usado, ou não tem nenhum container vivo
+    if not check_any_worker:
+        print("[INFO] Nenhum worker ativo encontrado. Iniciando subida de nova infraestrutura...")
+    # -----------------------------------
+
     if "--force" in sys.argv:
         needs_build = True
         print("[INFO] Modo --force detectado. Ignorando cache.")
@@ -173,10 +193,11 @@ def rebuild_blue_green():
     print("[WAIT] Aguardando 15 segundos para o novo worker estabilizar...")
     time.sleep(15)
 
+    
     # 6. Drenagem e Remoção do Antigo
     if current_color:
         # AQUI ESTÁ A MUDANÇA: Chama a drenagem em vez de matar direto
-        graceful_drain(current_color, timeout=None) # timeout=None espera pra sempre
+        graceful_drain(current_color, timeout=TIMEOUT_DRAIN) # timeout=None espera pra sempre
 
         # Depois que desligou, remove a stack (limpa redes e referências)
         print(f"[CLEAN] Removendo stack antiga ({current_color})...")

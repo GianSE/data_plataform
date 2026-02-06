@@ -1,7 +1,7 @@
 from prefect import flow
 import os
 import sys
-from flows_prefect._shared.wrappers import python_task
+from flows_prefect._shared.wrappers import python_task, standard_flow
 from flows_prefect._shared.deployment import gerenciar_run
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -11,7 +11,7 @@ sys.path.append(parent_dir)
 
 PY_PATH = "/app/tasks_python/silver"
 
-@flow(name="Silver Acode Compras Comercial")
+@standard_flow(name="Silver Acode Compras Comercial")
 def pipeline():
 
     python_task(

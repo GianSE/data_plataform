@@ -1,26 +1,42 @@
-name: CD - Deploy Automático em Produção
+name: CI - Verificação de Qualidade (Sem Deploy)
 
 on:
-  workflow_run:
-    workflows: ["CI - Verificação de Qualidade (Sem Deploy)"]
-    types: [completed]
-    branches: [main]
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  deploy:
-    # Só executa se os testes de qualidade passarem
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: [self-hosted, Windows, drogamais-server] # Roda em todos os runners com essa label
-    strategy:
-      matrix:
-        server: [prod-251, prod-252] # Garante a execução em ambos
+  testes-rapidos:
+    runs-on: ubuntu-latest
+    env:
+      DB_HOST: localhost
+      DB_USER: ci_user
+      DB_PASSWORD: ci_password
+      DB_NAME: ci_db
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: ci_key
+      MINIO_SECRET_KEY: ci_secret
+      MINIO_REGION: us-east-1
 
     steps:
-      - name: ⬇️ Atualizar Código (Git Pull)
+      - name: ⬇️ Baixar Código
         uses: actions/checkout@v3
 
-      - name: 🚀 Executar Soft Deploy (Refresh Prefect)
-        shell: pwsh
+      - name: 🐍 Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: 🐧 Instalar Dependências do SO (MariaDB Connector)
         run: |
-          # Como o runner já está na pasta do projeto, basta rodar o refresh
-          python _ops/deploy_all.py
+          sudo apt-get update
+          sudo apt-get install -y libmariadb-dev
+      # -----------------------------------------
+
+      - name: 📦 Instalar Dependências Python
+        run: |
+          pip install -r prefect-worker/requirements.txt
+
+      - name: 🕵️ Teste - Checagem de Imports
+        run: python _ops/check_imports.py
