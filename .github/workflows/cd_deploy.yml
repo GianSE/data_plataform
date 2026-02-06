@@ -1,15 +1,14 @@
-name: CD - Deploy Automático em Produção
+name: CD - Deploy Automático em Produção (Main Only)
 
+# Gatilhos específicos para a branch main
 on:
-  workflow_run:
-    workflows: ["CI - Verificação de Qualidade (Sem Deploy)"]
-    types: [completed]
-    branches: [main]
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   deploy:
-    # Só roda se o CI passou
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     name: Deploy em ${{ matrix.server }}
     runs-on: [self-hosted, Windows, "${{ matrix.server }}"]
     
