@@ -25,7 +25,7 @@ DIMENSOES_CONFIG = [
         "tabela": "dim_fornecedor_acode",
         "s3_path": S3_BASE,
         "colunas_origem": ["Fornecedor", "Fornecedor_CNPJ"], # Alterado aqui
-        "hash_cols": ["Fornecedor", "Fornecedor_CNPJ"],    # Alterado aqui
+        "hash_cols": ["Fornecedor"],    # Alterado aqui
         "id_col": "id_fornecedor",
     },
     {

@@ -48,8 +48,7 @@ def duckdb_csv():
                 CAST(hash(Desc_Marca) AS VARCHAR) AS id_marca,
                 CAST(hash(Fabricante) AS VARCHAR) AS id_fabricante,
                 CAST(hash(concat(Grupo, Sub_Classe)) AS VARCHAR) AS id_grupo_subclasse,
-                
-                CAST(Fornecedor_CNPJ AS VARCHAR(20)) AS fornecedor_cnpj,
+                CAST(hash(Fornecedor) AS VARCHAR) AS id_fornecedor,
                 CAST(Loja_CNPJ AS VARCHAR(20)) AS loja_cnpj,
                 CAST(Ano_Mes AS DATE) AS Ano_Mes,
                 
@@ -97,7 +96,7 @@ def csv_mariadb():
             id_fato INT AUTO_INCREMENT PRIMARY KEY,
             id_produto VARCHAR(50), 
             id_marca VARCHAR(50), 
-            fornecedor_cnpj VARCHAR(20),
+            id_fornecedor VARCHAR(20),
             id_fabricante VARCHAR(50), 
             id_grupo_subclasse VARCHAR(50),
             loja_cnpj VARCHAR(20), 
