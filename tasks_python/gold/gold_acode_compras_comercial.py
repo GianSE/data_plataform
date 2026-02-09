@@ -4,6 +4,7 @@ import os
 import tempfile
 import sys
 from _utils.monitor import DBMonitor
+from _utils.hash_generator import sql_gerar_hash_id
 from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 # Para enxergar um diretório acima
@@ -25,7 +26,7 @@ S3_BASE = "s3://silver/silver_acode_compras_produto_comercial/**/*.parquet"
 TEMP_DIR = tempfile.gettempdir()
 
 def duckdb_csv():
-    print(f"📂 [1/3] Arquivo temporário definido: {CSV_PATH}")
+    print(f"📂 [1/4] Arquivo temporário definido: {CSV_PATH}")
     
     con = duckdb.connect()
     try:
@@ -44,17 +45,16 @@ def duckdb_csv():
         query = f"""
         COPY (
             SELECT 
-                CAST(hash(concat(EAN, Produto)) AS VARCHAR) AS id_produto,
-                CAST(hash(Desc_Marca) AS VARCHAR) AS id_marca,
-                CAST(hash(Fabricante) AS VARCHAR) AS id_fabricante,
-                CAST(hash(concat(Grupo, Sub_Classe)) AS VARCHAR) AS id_grupo_subclasse,
-                CAST(hash(Fornecedor) AS VARCHAR) AS id_fornecedor,
+                -- Ordem Fixa: 1, 2, 3, 4, 5
+                {sql_gerar_hash_id(['EAN', 'Produto'], 'id_produto')},          -- 1
+                {sql_gerar_hash_id(['Desc_Marca'], 'id_marca')},                -- 2
+                {sql_gerar_hash_id(['Fabricante'], 'id_fabricante')},           -- 3
+                {sql_gerar_hash_id(['Grupo', 'Sub_Classe'], 'id_grupo_subclasse')}, -- 4
+                {sql_gerar_hash_id(['Fornecedor'], 'id_fornecedor')},           -- 5
                 CAST(Loja_CNPJ AS VARCHAR(20)) AS loja_cnpj,
                 CAST(Ano_Mes AS DATE) AS Ano_Mes,
-                
                 CAST(ACODE_Val_Total AS DECIMAL(15,4)) AS acode_val_total,
                 CAST(Qtd_Trib AS INT) AS qtd_trib,
-                
                 now() AS data_atualizacao
             FROM read_parquet('{S3_BASE}')
         ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
@@ -73,7 +73,7 @@ def csv_mariadb():
         return
 
     tamanho = os.path.getsize(CSV_PATH)
-    print(f"🐬 [2/3] Iniciando carga no MariaDB: {tamanho / 1e6:.2f} MB")
+    print(f"🐬 [2/4] Iniciando carga no MariaDB: {tamanho / 1e6:.2f} MB")
 
     conn = None
     try:
@@ -90,15 +90,15 @@ def csv_mariadb():
 
         print(f"🔨 Criando tabela staging: {table_new}")
         
-        # --- MUDANÇA NO DDL: IDs agora são VARCHAR(50) ---
+        # --- MUDANÇA NO DDL: IDs agora são BIGINT ---
         ddl = f"""
         CREATE TABLE {table_new} (
             id_fato INT AUTO_INCREMENT PRIMARY KEY,
-            id_produto VARCHAR(50), 
-            id_marca VARCHAR(50), 
-            id_fornecedor VARCHAR(20),
-            id_fabricante VARCHAR(50), 
-            id_grupo_subclasse VARCHAR(50),
+            id_produto VARCHAR(16),
+            id_marca VARCHAR(16),
+            id_fabricante VARCHAR(16),
+            id_grupo_subclasse VARCHAR(16),
+            id_fornecedor VARCHAR(16),
             loja_cnpj VARCHAR(20), 
             Ano_Mes DATE,
             acode_val_total DECIMAL(15,4),
@@ -120,8 +120,21 @@ def csv_mariadb():
         LOAD DATA LOCAL INFILE '{CSV_PATH}'
         INTO TABLE {table_new}
         FIELDS TERMINATED BY ';' LINES TERMINATED BY '\\n'
-        (id_produto, id_marca, id_fornecedor, id_fabricante, id_grupo_subclasse, 
-         loja_cnpj, Ano_Mes, acode_val_total, qtd_trib, data_atualizacao)
+        (
+            -- TEM QUE SER A MESMA ORDEM DO DUCKDB
+            id_produto,          -- 1
+            id_marca,            -- 2
+            id_fabricante,       -- 3
+            id_grupo_subclasse,  -- 4
+            id_fornecedor,       -- 5
+            
+            -- Resto...
+            loja_cnpj, 
+            Ano_Mes, 
+            acode_val_total, 
+            qtd_trib, 
+            data_atualizacao
+        )
         """
         cursor.execute(sql_load)
         conn.commit()
@@ -139,9 +152,9 @@ def csv_mariadb():
         ALTER TABLE {table_new}
             ADD INDEX idx_produto (id_produto),
             ADD INDEX idx_marca (id_marca),
-            ADD INDEX idx_id_fornecedor (id_fornecedor),
             ADD INDEX idx_fabricante (id_fabricante),
             ADD INDEX idx_grupo_subclasse (id_grupo_subclasse),
+            ADD INDEX idx_fornecedor (id_fornecedor),
             ADD INDEX idx_loja_cnpj (loja_cnpj),
             ADD INDEX idx_Ano_Mes (Ano_Mes);
         """
@@ -170,7 +183,7 @@ def csv_mariadb():
             conn.close()
 
 def limpar_temp():
-    print("🧹 [3/3] Limpeza de arquivos temporários...")
+    print("🧹 [3/4] Limpeza de arquivos temporários...")
     if os.path.exists(CSV_PATH):
         try:
             os.remove(CSV_PATH)
@@ -180,8 +193,55 @@ def limpar_temp():
     else:
         print("ℹ️ Nenhum arquivo para limpar.")
 
+def verificar_integridade():
+    print("🔍 [4/4] Verificando integridade referencial...")
+    conn = mariadb.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    
+    # Lista de dimensões para checar
+    checks = [
+        ("id_produto", "dim_produto_acode"),
+        ("id_marca", "dim_marca_acode"),
+        ("id_fabricante", "dim_fabricante_acode"),
+        ("id_grupo_subclasse", "dim_grupo_subclasse_acode"),
+        ("id_fornecedor", "dim_fornecedor_acode")
+    ]
+    
+    table_fato = "gold_acode_compras_produto_comercial"
+    
+    for col_id, table_dim in checks:
+        sql = f"""
+            SELECT COUNT(DISTINCT f.{col_id}) 
+            FROM {table_fato} f
+            LEFT JOIN {table_dim} d ON f.{col_id} = d.{col_id}
+            WHERE d.{col_id} IS NULL
+        """
+        cursor.execute(sql)
+        orphans = cursor.fetchone()[0]
+        
+        if orphans > 0:
+            print(f"⚠️ ALERTA CRÍTICO: {orphans} IDs de {col_id} na Fato não existem na {table_dim}!")
+            
+            # Opcional: Mostrar exemplo de ID órfão para você investigar
+            sql_exemplo = f"""
+                SELECT DISTINCT f.{col_id} 
+                FROM {table_fato} f
+                LEFT JOIN {table_dim} d ON f.{col_id} = d.{col_id}
+                WHERE d.{col_id} IS NULL
+                LIMIT 1
+            """
+            cursor.execute(sql_exemplo)
+            ex_id = cursor.fetchone()[0]
+            print(f"Exemplo de Hash órfão: {ex_id}")
+            
+        else:
+            print(f"✅ {col_id}: Integridade 100%.")
+            
+    conn.close()
+
 # --- ORQUESTRAÇÃO PRINCIPAL ---
 if __name__ == "__main__":
     duckdb_csv()
     csv_mariadb()
     limpar_temp()
+    verificar_integridade()

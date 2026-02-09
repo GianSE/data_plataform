@@ -2,13 +2,14 @@ import duckdb
 import mariadb
 import os
 import sys
+import hashlib # Necessário para a vacina
+from _utils.hash_generator import sql_gerar_hash_id
 from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 # Ajuste de PATH
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
-
 
 setup_minio_env()
 S3_BASE = "s3://silver/silver_acode_compras_produto_comercial/**/*.parquet"
@@ -24,8 +25,8 @@ DIMENSOES_CONFIG = [
     {
         "tabela": "dim_fornecedor_acode",
         "s3_path": S3_BASE,
-        "colunas_origem": ["Fornecedor", "Fornecedor_CNPJ"], # Alterado aqui
-        "hash_cols": ["Fornecedor"],    # Alterado aqui
+        "colunas_origem": ["Fornecedor"], 
+        "hash_cols": ["Fornecedor"],
         "id_col": "id_fornecedor",
     },
     {
@@ -63,34 +64,33 @@ def duckdb_csv(config):
     try:
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(DUCKDB_SECRET_SQL)
+        con.execute("SET preserve_insertion_order=false;")
 
-        # --- O SEGREDO ESTÁ AQUI ---
-        # Convertemos o Hash (número gigante) para VARCHAR (texto).
-        # Assim o Power BI trata como código alfanumérico e não tenta arredondar.
-        hash_sql = f"CAST(hash(concat({', '.join(config['hash_cols'])})) AS VARCHAR)"
+        # Gera o SQL do Hash (Versão Hex Slice 15 -> BIGINT)
+        hash_sql = sql_gerar_hash_id(config['hash_cols'], config['id_col'])
         
         select_cols = []
         for col in config["colunas_origem"]:
             novo_nome = config.get("renames", {}).get(col, col)
-            # Limpeza e conversão para texto
+            # Limpeza CRÍTICA: Remove quebras de linha que matam o CSV
             select_cols.append(f"CAST(regexp_replace(\"{col}\", '[\n\r;]', '', 'g') AS VARCHAR) AS \"{novo_nome}\"")
             
         select_str = ", ".join(select_cols)
 
+        # --- A MUDANÇA ESTÁ AQUI: SELECT DISTINCT ---
+        # Substituímos GROUP BY ALL por DISTINCT.
+        # Isso garante unicidade baseada exatamente nas colunas selecionadas.
         query = f"""
         COPY (
-            SELECT
-                {hash_sql} AS {config['id_col']},
+            SELECT DISTINCT
+                {hash_sql},
                 {select_str},
-                MAX(Ano_Mes) AS Ano_Mes,
                 now() AS data_atualizacao
             FROM read_parquet('{config['s3_path']}')
-            WHERE "{config['hash_cols'][0]}" IS NOT NULL
-            GROUP BY ALL
         ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
         """
         con.execute(query)
-        print("   ✅ CSV gerado (IDs como Texto).")
+        print("   ✅ CSV gerado (Modo DISTINCT).")
         return CSV_PATH
 
     except Exception as e:
@@ -118,19 +118,14 @@ def csv_mariadb(config, CSV_PATH):
         cursor.execute(f"DROP TABLE IF EXISTS {table_new}")
         cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
         
-        # --- AQUI TAMBÉM MUDAMOS ---
-        # O ID agora é VARCHAR(50). Isso é leve e compatível com tudo.
-        colunas_ddl = [f"{config['id_col']} VARCHAR(50) PRIMARY KEY"]
+        # --- DDL: VARCHAR(16) ---
+        colunas_ddl = [f"{config['id_col']} VARCHAR(16) PRIMARY KEY"] # Agora é VARCHAR(16)
         colunas_load = [config['id_col']]
         
         for col in config["colunas_origem"]:
             novo_nome = config.get("renames", {}).get(col, col)
-            # Padrão VARCHAR(255)
             colunas_ddl.append(f"`{novo_nome}` VARCHAR(255)")
             colunas_load.append(novo_nome)
-            
-        colunas_ddl.append("Ano_Mes DATE")
-        colunas_load.append("Ano_Mes")
 
         colunas_ddl.append("data_atualizacao DATETIME")
         colunas_load.append("data_atualizacao")
@@ -149,16 +144,45 @@ def csv_mariadb(config, CSV_PATH):
         ({', '.join(colunas_load)})
         """
         cursor.execute(sql_load)
+        linhas_csv = cursor.rowcount
+        print(f"   🚚 Carregados {linhas_csv} registros do CSV.")
+
+        # --- 💉 A VACINA (CORREÇÃO DE ÓRFÃOS) ---
+        # Injeta manualmente o ID do "ND" para garantir que ele exista.
+        # Lógica Python idêntica ao SQL: md5('ND') -> slice 15 -> int
+        
+        # 1. Gera o ID do ND
+        id_nd = hashlib.md5("ND".encode()).hexdigest()[:16]
+        
+        # Se tiver mais de uma coluna de texto (ex: Grupo, Subclasse), preenche todas com 'ND'
+        campos_texto = []
+        valores_texto = []
+        for col in config["colunas_origem"]:
+            nome_campo = config.get("renames", {}).get(col, col)
+            campos_texto.append(f"`{nome_campo}`")
+            valores_texto.append("'ND - NAO DEFINIDO'") # Valor padrão
+            
+        sql_vacina = f"""
+        INSERT IGNORE INTO {table_new} 
+            ({config['id_col']}, {', '.join(campos_texto)}, data_atualizacao)
+        VALUES 
+            ('{id_nd}', {', '.join(valores_texto)}, NOW());  -- Note as aspas em '{id_nd}'
+        """
+        cursor.execute(sql_vacina)
+        if cursor.rowcount > 0:
+            print(f"   💉 Vacina aplicada: Registro 'ND' (ID {id_nd}) criado com sucesso.")
+        else:
+            print(f"   🛡️ Vacina: Registro 'ND' já existia.")
+            
         conn.commit()
+        # ----------------------------------------
 
         # Índices
         if len(config["colunas_origem"]) > 0:
             col_nome = config.get("renames", {}).get(config["colunas_origem"][0], config["colunas_origem"][0])
             try:
-                cursor.execute(f"CREATE INDEX idx_busca_{col_nome} ON {table_new} (`{col_nome}`(50))")
-                cursor.execute(f"CREATE INDEX idx_Ano_Mes ON {table_new} (Ano_Mes)")
-            except Exception: 
-                pass
+                cursor.execute(f"CREATE INDEX idx_busca_{col_nome} ON {table_new} (`{col_nome}`(30))")
+            except Exception: pass
 
         # Swap
         cursor.execute(f"SHOW TABLES LIKE '{table_prod}'")
@@ -173,21 +197,17 @@ def csv_mariadb(config, CSV_PATH):
 
     except Exception as e:
         print(f"   ❌ Erro no MariaDB: {e}")
-        if conn: 
-            conn.rollback()
+        if conn: conn.rollback()
     finally:
-        if conn: 
-            conn.close()
+        if conn: conn.close()
 
 def limpar_temp(CSV_PATH):
     if CSV_PATH and os.path.exists(CSV_PATH):
-        try: 
-            os.remove(CSV_PATH)
-        except Exception: 
-            pass
+        try: os.remove(CSV_PATH)
+        except Exception: pass
 
 if __name__ == "__main__":
-    print("🚀 Iniciando Pipeline Dimensões (Modo VARCHAR Safe)...")
+    print("🚀 Iniciando Pipeline Dimensões (Modo DISTINCT + VARCHAR(16) + VACINA)...")
     for dim in DIMENSOES_CONFIG:
         caminho = duckdb_csv(dim)
         if caminho:

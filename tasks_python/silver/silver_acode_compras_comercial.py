@@ -36,24 +36,33 @@ def processar_silver():
         print(f"   📊 Total de registros brutos na Bronze (24 meses): {total_bronze:,}")
 
         # --- PASSO 2: TRANSFORMAÇÃO EM MEMÓRIA ---
+
         print(f"🛠️ [STEP 3] Executando agregação e limpeza (In-Memory)...")
-        # Criamos uma tabela temporária para validar o resultado antes de subir para o S3
         con.execute(f"""
             CREATE OR REPLACE TEMP TABLE silver_staged AS 
             SELECT 
-                EAN,
+                -- 1. Limpeza de Chaves (Para evitar duplicidade por sujeira)
+                UPPER(TRIM(COALESCE(EAN, 'ND'))) AS EAN,
+                UPPER(TRIM(COALESCE(Produto, 'ND'))) AS Produto,
+                UPPER(TRIM(COALESCE(Fabricante, 'ND'))) AS Fabricante,
+                UPPER(TRIM(COALESCE(Grupo, 'ND'))) AS Grupo,
+                UPPER(TRIM(COALESCE(Sub_Classe, 'ND'))) AS Sub_Classe,
+                UPPER(TRIM(COALESCE(Desc_Marca, 'ND'))) AS Desc_Marca,
+
+                -- 2. Tratamento do Fornecedor (Nome)
+                -- O ideal seria pegar o nome mais frequente (mode), mas MAX resolve se padronizar
+                MAX(UPPER(TRIM(COALESCE(Fornecedor, 'ND')))) AS Fornecedor,
+                
+                -- 3. Tratamento do CNPJ (Garante 14 dígitos)
+                LPAD(CAST(regexp_replace(Fornecedor_CNPJ, '[^0-9]', '', 'g') AS BIGINT)::VARCHAR, 14, '0') AS Fornecedor_CNPJ,
                 Loja_CNPJ,
+                
+                -- 4. Datas e Métricas
                 strptime(Ano_Mes, '%Y%m')::DATE AS Ano_Mes, 
                 ano, 
-                Produto,
-                Fabricante,
-                MAX(Fornecedor) AS Fornecedor,
-                LPAD(CAST(CAST(Fornecedor_CNPJ AS BIGINT) AS VARCHAR), 14, '0') AS Fornecedor_CNPJ,
-                Grupo,
-                Sub_Classe,
-                Desc_Marca,
                 SUM(CAST(ACODE_Val_Total AS DECIMAL(18,4))) AS ACODE_Val_Total,
                 SUM(CAST(Qtd_Trib AS BIGINT)) AS Qtd_Trib,
+                
                 now() AS data_atualizacao
             FROM bronze_view
             WHERE data_emissao >= (date_trunc('month', current_date) - INTERVAL 24 MONTH)
