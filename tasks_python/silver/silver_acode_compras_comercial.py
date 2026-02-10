@@ -39,20 +39,19 @@ def processar_silver_em_lotes():
 
         # --- MAPEAR ARQUIVOS (VIEW) ---
         # Criamos a view uma única vez apontando para tudo
-        # --- CORREÇÃO: USAR 'REPLACE' PARA FORÇAR TIPAGEM ---
-        print(f"🔍 [STEP 1] Mapeando arquivos da Bronze (Com Cast via SQL)...")
+        # --- CORREÇÃO FINAL: USAR 'schema' DENTRO DO READ_PARQUET ---
+        print(f"🔍 [STEP 1] Mapeando arquivos da Bronze (Forçando Schema na Leitura)...")
+        
+        # O parâmetro 'schema' obriga o DuckDB a usar esses tipos antes de ler qualquer byte
         con.execute(f"""
             CREATE OR REPLACE VIEW bronze_view AS 
-            SELECT * REPLACE (
-                -- Força Qtd_Trib a ser BIGINT (aceita negativos)
-                CAST(Qtd_Trib AS BIGINT) AS Qtd_Trib,
-                
-                -- Força Valor a ser DOUBLE (previne erros de decimal)
-                CAST(ACODE_Val_Total AS DOUBLE) AS ACODE_Val_Total
-            )
-            FROM read_parquet('{BRONZE_PATH}', 
+            SELECT * FROM read_parquet('{BRONZE_PATH}', 
                 hive_partitioning = true,
-                union_by_name = true
+                union_by_name = true,
+                schema = {{
+                    'Qtd_Trib': 'BIGINT', 
+                    'ACODE_Val_Total': 'DOUBLE'
+                }}
             );
         """)
 
