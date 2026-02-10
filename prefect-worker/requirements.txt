@@ -1,9 +1,9 @@
 prefect==3.6.13
-duckdb
-sqlalchemy
-mariadb
-pandas
-polars
-python-dotenv
-pyarrow
-s3fs
+duckdb==1.4.4
+sqlalchemy==2.0.46
+mariadb==1.1.14
+pandas==3.0.0
+polars==1.38.0
+python-dotenv==1.2.1
+pyarrow==23.0.0
+s3fs==2026.2.0

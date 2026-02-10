@@ -40,7 +40,14 @@ def processar_silver_em_lotes():
         # --- MAPEAR ARQUIVOS (VIEW) ---
         # Criamos a view uma única vez apontando para tudo
         print(f"🔍 [STEP 1] Mapeando arquivos da Bronze...")
-        con.execute(f"CREATE OR REPLACE VIEW bronze_view AS SELECT * FROM read_parquet('{BRONZE_PATH}', hive_partitioning = true);")
+        con.execute(f"""
+            CREATE OR REPLACE VIEW bronze_view AS 
+            SELECT * FROM read_parquet('{BRONZE_PATH}', 
+                hive_partitioning = true,
+                union_by_name = true,
+                types = {{'Qtd_Trib': 'BIGINT', 'ACODE_Val_Total': 'DOUBLE'}}
+            );
+        """)
 
         # --- LOOP DE PROCESSAMENTO ---
         for ano_corrente in anos_para_processar:
