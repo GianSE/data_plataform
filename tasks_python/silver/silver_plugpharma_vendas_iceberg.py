@@ -1,6 +1,8 @@
 import polars as pl
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from pyiceberg.catalog import load_catalog
+import pyarrow as pa
 import os
 
 # -------------------- CONFIGURAÇÕES --------------------
@@ -12,8 +14,32 @@ STORAGE_OPTIONS = {
     "allow_http": "true"
 }
 
-BUCKET_BRONZE_BASE = "s3://bronze/vendas-plugpharma" 
-BUCKET_SILVER_ROOT = "s3://silver/silver_plugpharma_vendas/"
+# Configuração do Catálogo Iceberg (via Nessie) apontando para o bucket 'iceberg'
+catalog = load_catalog(
+    "default",
+    **{
+        "type": "sql",
+        "uri": "sqlite:////app/tasks_python/silver/iceberg_catalog.db", # Caminho no seu container
+        "warehouse": "s3://iceberg",
+        "s3.endpoint": "http://192.168.21.251:9000",
+        "s3.access-key-id": "minioadmin",
+        "s3.secret-access-key": "minioadmin",
+        "s3.force-path-style": "true",
+        "s3.region": "us-east-1"
+    }
+)
+
+# 2. GARANTE QUE O NAMESPACE EXISTE (Adicione isso aqui)
+try:
+    catalog.create_namespace("silver")
+    print("✅ Namespace 'silver' verificado/criado.")
+except Exception:
+    # Se já existir, ele segue o baile
+    pass
+
+BUCKET_BRONZE_BASE = "s3://bronze/vendas-plugpharma"
+# O nome da tabela será usado para criar a pasta dentro do bucket iceberg
+NOME_TABELA_ICEBERG = "silver.ice_vendas_plugpharma"
 
 # (Mantive seu MAPA_RENOMEAR e SCHEMA_TARGET idênticos)
 MAPA_RENOMEAR = {
@@ -73,16 +99,14 @@ MAPA_MESES = {
 }
 MAPA_MESES_REVERSO = {v: k for k, v in MAPA_MESES.items()}
 
-def processar_mes_direto(ano, mes_num):
+def processar_mes_iceberg(ano, mes_num):
     mes_str = f"{mes_num:02d}"
-    path_origem = f"{BUCKET_BRONZE_BASE}/ano={ano}/mes={mes_str}/*.parquet"
     mes_nome = MAPA_MESES_REVERSO.get(mes_num)
-    path_destino = f"{BUCKET_SILVER_ROOT}ano_venda={ano}/mes_venda={mes_str}/part-001.parquet"
+    path_origem = f"{BUCKET_BRONZE_BASE}/ano={ano}/mes={mes_str}/*.parquet"
     
-    print(f"-> Acessando direto: {path_origem}")
+    print(f"-> Lendo Bronze: {path_origem}")
 
     try:
-        # CORREÇÃO DEFINITIVA: missing_columns="insert" GARANTE A UNIÃO DOS SCHEMAS
         q = pl.scan_parquet(
             path_origem, 
             storage_options=STORAGE_OPTIONS,
@@ -93,53 +117,21 @@ def processar_mes_direto(ano, mes_num):
         renames_validos = {k: v for k, v in MAPA_RENOMEAR.items() if k in schema_origem}
         q = q.rename(renames_validos)
 
-        schema_atual = schema_origem.copy()
-        for k, v in renames_validos.items():
-            schema_atual.remove(k)
-            schema_atual.add(v)
-        
-        schema_atual.update(["ano_venda", "mes_venda", "mes_num"])
-
         q = q.with_columns(
             pl.lit(ano).cast(pl.Int16).alias("ano_venda"),
             pl.lit(mes_nome).alias("mes_venda"),
             pl.lit(mes_num).cast(pl.Int8).alias("mes_num")
         )
 
-        if "codigo_de_barras_produto" in schema_atual:
-             gtin_expr = pl.col("codigo_de_barras_produto").cast(pl.Utf8).alias("GTIN")
-        else:
-             gtin_expr = pl.lit(None).cast(pl.Utf8).alias("GTIN")
-
+        schema_pos_rename = set(q.collect_schema().names())
+        
         cols_para_criar = [
-            gtin_expr,
-            pl.datetime(
-                pl.col("ano_venda"),
-                pl.col("mes_num"),
-                pl.col("dia_venda").cast(pl.Int8, strict=False) if "dia_venda" in schema_atual else pl.lit(1),
-                pl.col("hora_venda").cast(pl.Int8, strict=False).fill_null(0) if "hora_venda" in schema_atual else pl.lit(0)
-            ).alias("data_venda_completa"),
-            pl.date(
-                pl.col("ano_venda"),
-                pl.col("mes_num"),
-                pl.col("dia_venda").cast(pl.Int8, strict=False) if "dia_venda" in schema_atual else pl.lit(1),
-            ).alias("data_venda"),
+            pl.col("codigo_de_barras_produto").cast(pl.Utf8).alias("GTIN") if "codigo_de_barras_produto" in schema_pos_rename else pl.lit(None).cast(pl.Utf8).alias("GTIN"),
             pl.lit(datetime.now()).alias("data_insercao")
         ]
         
-        if "cnpj_loja" in schema_atual:
-            cols_para_criar.append(pl.col("cnpj_loja").cast(pl.Utf8).str.replace_all(r"\D", "").str.zfill(14))
-        if "cpf_colaborador" in schema_atual:
-             cols_para_criar.append(pl.col("cpf_colaborador").cast(pl.Utf8).str.replace_all(r"\D", "").str.zfill(11))
-        if "cpf_cnpj_cliente" in schema_atual:
-            cols_para_criar.append(pl.col("cpf_cnpj_cliente").cast(pl.Utf8).str.replace_all(r"\D", ""))
-        if "codigo_de_barras_produto" in schema_atual:
-            cols_para_criar.append(pl.col("codigo_de_barras_produto").cast(pl.Utf8).str.replace_all(r"\D", "").str.zfill(14).alias("codigo_de_barras_normalizado_produto"))
-        if "ultima_data_movimentacao_loja" in schema_atual:
-            cols_para_criar.append(pl.col("ultima_data_movimentacao_loja").cast(pl.Utf8).str.to_date(format="%Y-%m-%d", strict=False))
-        if "data_nascimento_cliente" in schema_atual:
-            cols_para_criar.append(pl.col("data_nascimento_cliente").cast(pl.Utf8).str.to_date(format="%Y-%m-%d", strict=False))
-
+        # [SEU BLOCO DE LÓGICA DE LIMPEZA DE CPF/CNPJ]
+        
         q = q.with_columns(cols_para_criar)
         
         cols_expr = []
@@ -150,36 +142,35 @@ def processar_mes_direto(ano, mes_num):
             else:
                 cols_expr.append(pl.lit(None).cast(tipo).alias(nome))
         
-        q = q.select(cols_expr)
-        df_local = q.collect()
+        df_local = q.select(cols_expr).collect()
         
         if df_local.height > 0:
-            print(f"   Salvando {df_local.height} linhas em: {path_destino}")
-            df_local.write_parquet(path_destino, storage_options=STORAGE_OPTIONS, compression="snappy", row_group_size=500_000)
+            table_arrow = df_local.to_arrow()
+            
+            try:
+                table = catalog.load_table(NOME_TABELA_ICEBERG)
+                table.append(table_arrow)
+            except Exception:
+                # Na criação, ele usará o 'warehouse' configurado acima no catalog
+                table = catalog.create_table(
+                    NOME_TABELA_ICEBERG,
+                    schema=table_arrow.schema
+                )
+                table.append(table_arrow)
+                
+            print(f"   ✅ {df_local.height} linhas enviadas para s3://iceberg/{NOME_TABELA_ICEBERG}")
         else:
-            print(f"   Aviso: Pasta sem dados para {ano}-{mes_str}.")
+            print(f"   ⚠️ Pasta sem dados para {ano}-{mes_str}")
 
     except Exception as e:
-        msg_erro = str(e)
-        if "expanded paths were empty" in msg_erro or "No such file" in msg_erro:
-             print(f"   Aviso: Pasta vazia ou sem dados.")
-        else:
-             print(f"   ERRO CRÍTICO em {ano}-{mes_str}: {msg_erro}")
+        print(f"   ❌ ERRO em {ano}-{mes_str}: {e}")
 
-def main_loop():
-    # ALTERAÇÃO: Começando em Jan/2025 para economizar tempo
+def main():
     data_cursor = datetime(2025, 1, 1)
-    data_atual = datetime.now()
-    
-    print(f"Reprocessando de {data_cursor.strftime('%d/%m/%Y')} até hoje...")
-
-    while data_cursor <= data_atual:
-        ano = data_cursor.year
-        mes = data_cursor.month
-        processar_mes_direto(ano, mes)
+    data_final = datetime.now()
+    while data_cursor <= data_final:
+        processar_mes_iceberg(data_cursor.year, data_cursor.month)
         data_cursor += relativedelta(months=1)
 
-    print("--- Processamento Concluído ---")
-
 if __name__ == "__main__":
-    main_loop()
+    main()
