@@ -17,8 +17,8 @@ if not os.path.exists(METADATA_DIR):
     os.makedirs(METADATA_DIR, exist_ok=True)
 
 # --- [BYPASS DE CREDENCIAIS DOCKER] ---
-os.environ["DOCKER_BUILDKIT"] = "0"
-os.environ["COMPOSE_DOCKER_CLI_BUILD"] = "0"
+os.environ["DOCKER_BUILDKIT"] = "1"
+os.environ["COMPOSE_DOCKER_CLI_BUILD"] = "1"
 
 def get_long_path(path):
     try:
@@ -117,8 +117,8 @@ def rebuild_blue_green():
         image_name = extract_image_name()
         print(f"[BUILD] Gerando nova imagem: {image_name}")
         
-        # Build manual para ignorar erros de credenciais do Docker Desktop
-        cmd_build = f"{DOCKER_CMD} build -t {image_name} -f Dockerfile .."
+        # Adicionei --load para garantir que a imagem saia do cache para o registro local
+        cmd_build = f"{DOCKER_CMD} build --load -t {image_name} -f Dockerfile .."
         if not run_command(cmd_build, "Docker Build"): sys.exit(1)
         save_new_hashes(new_hashes)
 

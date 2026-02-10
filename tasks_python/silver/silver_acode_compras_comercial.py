@@ -39,13 +39,20 @@ def processar_silver_em_lotes():
 
         # --- MAPEAR ARQUIVOS (VIEW) ---
         # Criamos a view uma única vez apontando para tudo
-        print(f"🔍 [STEP 1] Mapeando arquivos da Bronze...")
+        # --- CORREÇÃO: USAR 'REPLACE' PARA FORÇAR TIPAGEM ---
+        print(f"🔍 [STEP 1] Mapeando arquivos da Bronze (Com Cast via SQL)...")
         con.execute(f"""
             CREATE OR REPLACE VIEW bronze_view AS 
-            SELECT * FROM read_parquet('{BRONZE_PATH}', 
+            SELECT * REPLACE (
+                -- Força Qtd_Trib a ser BIGINT (aceita negativos)
+                CAST(Qtd_Trib AS BIGINT) AS Qtd_Trib,
+                
+                -- Força Valor a ser DOUBLE (previne erros de decimal)
+                CAST(ACODE_Val_Total AS DOUBLE) AS ACODE_Val_Total
+            )
+            FROM read_parquet('{BRONZE_PATH}', 
                 hive_partitioning = true,
-                union_by_name = true,
-                types = {{'Qtd_Trib': 'BIGINT', 'ACODE_Val_Total': 'DOUBLE'}}
+                union_by_name = true
             );
         """)
 
