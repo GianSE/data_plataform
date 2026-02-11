@@ -3,6 +3,24 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import os
 
+""" 
+1 - "incremental"   (reescreve o mes atual e os 2 meses anteriores) 
+2 - "range"         (reescreve todos os parquet da data_inio a data_fim)
+3 - "pontual"       (reescreve um parquet em específico para tratar erros de envio)
+"""
+
+MODO = "incremental"  # incremental | pontual | range
+
+# usado no modo pontual
+ANO_PONTUAL = 2021
+MES_PONTUAL = 9
+
+# usado no modo range
+DATA_INICIO = datetime(2014, 1, 1)
+DATA_FIM = datetime(2019, 12, 1)
+
+
+
 # -------------------- CONFIGURAÇÕES --------------------
 STORAGE_OPTIONS = {
     "endpoint_url": "http://192.168.21.251:9000",
@@ -166,20 +184,41 @@ def processar_mes_direto(ano, mes_num):
         else:
              print(f"   ERRO CRÍTICO em {ano}-{mes_str}: {msg_erro}")
 
-def main_loop():
-    # ALTERAÇÃO: Começando em Jan/2025 para economizar tempo
-    data_cursor = datetime(2025, 1, 1)
+def main():
     data_atual = datetime.now()
-    
-    print(f"Reprocessando de {data_cursor.strftime('%d/%m/%Y')} até hoje...")
 
-    while data_cursor <= data_atual:
-        ano = data_cursor.year
-        mes = data_cursor.month
-        processar_mes_direto(ano, mes)
-        data_cursor += relativedelta(months=1)
+    if MODO == "incremental":
+        print("Modo incremental (Mês atual, anterior e anterior-anterior)")
+        
+        # Mês atual
+        processar_mes_direto(data_atual.year, data_atual.month)
+        
+        # Mês anterior
+        mes_anterior = data_atual - relativedelta(months=1)
+        processar_mes_direto(mes_anterior.year, mes_anterior.month)
 
-    print("--- Processamento Concluído ---")
+        # Mês anterior ao anterior
+        mes_anterior_2 = data_atual - relativedelta(months=2)
+        processar_mes_direto(mes_anterior_2.year, mes_anterior_2.month)
+
+    elif MODO == "pontual":
+        print(f"Modo PONTUAL -> {ANO_PONTUAL}-{MES_PONTUAL:02d}")
+        processar_mes_direto(ANO_PONTUAL, MES_PONTUAL)
+
+    elif MODO == "range":
+        print(f"Modo RANGE -> {DATA_INICIO.strftime('%Y-%m')} até {DATA_FIM.strftime('%Y-%m')}")
+
+        if DATA_INICIO > DATA_FIM:
+            raise ValueError("DATA_INICIO maior que DATA_FIM")
+
+        data_cursor = DATA_INICIO
+
+        while data_cursor <= DATA_FIM:
+            processar_mes_direto(data_cursor.year, data_cursor.month)
+            data_cursor += relativedelta(months=1)
+
+    else:
+        raise ValueError("Modo inválido")
 
 if __name__ == "__main__":
-    main_loop()
+    main()

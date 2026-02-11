@@ -3,6 +3,7 @@ import mariadb
 import os
 import tempfile
 import sys
+from datetime import datetime
 from _utils.monitor import DBMonitor
 from _utils.hash_generator import sql_gerar_hash_id
 from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
@@ -12,18 +13,12 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
-
 # 1. Configura o ambiente (MinIO) automaticamente
 setup_minio_env()
 
-# 2. Define o caminho do CSV usando a função padronizada
+# 2. Define o caminho do CSV
 CSV_PATH = get_temp_csv_caminho("carga_gold_final.csv")
-
-# Caminho minio da tabela silver 
 S3_BASE = "s3://silver/silver_acode_compras_produto_comercial/**/*.parquet"
-
-# Caminho do arquivo definido globalmente para todas as funções verem
-TEMP_DIR = tempfile.gettempdir()
 
 def duckdb_csv():
     print(f"📂 [1/4] Arquivo temporário definido: {CSV_PATH}")
@@ -33,19 +28,18 @@ def duckdb_csv():
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(DUCKDB_SECRET_SQL)
 
-        # --- CONFIGURAÇÕES CORRETAS PARA EVITAR O ERRO DE CAST/BUFFER ---
-        con.execute("SET http_keep_alive=false;") # Evita problemas com conexões persistentes no MinIO
+        # Configurações de memória e cache
+        con.execute("SET http_keep_alive=false;")
         con.execute("SET preserve_insertion_order=false;") 
-        con.execute("PRAGMA disable_object_cache;") # Importante para evitar o erro de ponteiro negativo
-        # --------------------------------------------------------------
+        con.execute("PRAGMA disable_object_cache;") 
 
         print("🦆 DuckDB: Extraindo dados e gerando CSV...")
         
-        # --- MUDANÇA PRINCIPAL: IDs convertidos para VARCHAR (Texto) ---
+        # IMPORTANTE: A ordem do SELECT deve bater com o LOAD DATA
+        # IMPORTANTE: O ORDER BY deve bater com a PRIMARY KEY do MariaDB
         query = f"""
         COPY (
             SELECT 
-                -- Ordem Fixa: 1, 2, 3, 4, 5
                 {sql_gerar_hash_id(['EAN', 'Produto'], 'id_produto')},          -- 1
                 {sql_gerar_hash_id(['Desc_Marca'], 'id_marca')},                -- 2
                 {sql_gerar_hash_id(['Fabricante'], 'id_fabricante')},           -- 3
@@ -57,13 +51,16 @@ def duckdb_csv():
                 CAST(Qtd_Trib AS INT) AS qtd_trib,
                 now() AS data_atualizacao
             FROM read_parquet('{S3_BASE}')
+            WHERE ano >= 2023
+            -- ALINHADO COM A PK (Data -> Produto -> Loja)
+            ORDER BY Ano_Mes ASC, id_produto ASC, loja_cnpj ASC
         ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
         """
         con.execute(query)
         print("✅ CSV gerado com sucesso.")
     except Exception as e:
         print(f"❌ Erro no DuckDB: {e}")
-        sys.exit(1) # Para o script se falhar aqui
+        sys.exit(1)
     finally:
         con.close()
 
@@ -73,7 +70,7 @@ def csv_mariadb():
         return
 
     tamanho = os.path.getsize(CSV_PATH)
-    print(f"🐬 [2/4] Iniciando carga no MariaDB: {tamanho / 1e6:.2f} MB")
+    print(f"🐬 [2/4] Iniciando carga no MariaDB (InnoDB Otimizado): {tamanho / 1e6:.2f} MB")
 
     conn = None
     try:
@@ -84,51 +81,93 @@ def csv_mariadb():
         table_new = f"{table_prod}_new"
         table_old = f"{table_prod}_old"
 
-        # Limpeza preventiva
+        # ---------------------------------------------------------
+        # 0. GERAÇÃO DINÂMICA DE PARTIÇÕES
+        # ---------------------------------------------------------
+        ano_atual = datetime.now().year
+        ano_inicio = 2022
+        
+        particoes_list = []
+        for ano in range(ano_inicio, ano_atual + 2):
+            particoes_list.append(f"PARTITION p{ano} VALUES LESS THAN ({ano + 1})")
+        
+        particoes_list.append("PARTITION pmax VALUES LESS THAN MAXVALUE")
+        
+        # Formatação bonita para injetar no SQL
+        sql_particoes_dinamicas = ",\n            ".join(particoes_list)
+        
+        print(f"⚙️ Partições geradas dinamicamente: {len(particoes_list)} partições.")
+        # ---------------------------------------------------------
+
+        # Limpeza
         cursor.execute(f"DROP TABLE IF EXISTS {table_new}")
         cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
 
-        print(f"🔨 Criando tabela staging: {table_new}")
+        print(f"🔨 Criando tabela otimizada: {table_new}")
         
-        # --- MUDANÇA NO DDL: IDs agora são BIGINT ---
         ddl = f"""
         CREATE TABLE {table_new} (
-            id_fato INT AUTO_INCREMENT PRIMARY KEY,
-            id_produto VARCHAR(16),
-            id_marca VARCHAR(16),
-            id_fabricante VARCHAR(16),
-            id_grupo_subclasse VARCHAR(16),
-            id_fornecedor VARCHAR(16),
-            loja_cnpj VARCHAR(20), 
-            Ano_Mes DATE,
+            -- Dimensões (IDs)
+            id_produto VARCHAR(16) NOT NULL,
+            id_marca VARCHAR(16) NOT NULL,
+            id_fabricante VARCHAR(16) NOT NULL,
+            id_grupo_subclasse VARCHAR(16) NOT NULL,
+            id_fornecedor VARCHAR(16) NOT NULL,
+            
+            -- Contexto
+            loja_cnpj VARCHAR(20) NOT NULL, 
+            Ano_Mes DATE NOT NULL,
+            
+            -- Métricas
             acode_val_total DECIMAL(15,4),
             qtd_trib INT, 
-            data_atualizacao DATETIME
-        ) ENGINE=Aria TRANSACTIONAL=0 ROW_FORMAT=PAGE;
+            data_atualizacao DATETIME,
+
+            -- 1. PRIMARY KEY (CLUSTERED INDEX)
+            -- Estratégia atual: Data -> Produto -> Loja
+            PRIMARY KEY (Ano_Mes, id_produto, loja_cnpj),
+
+            -- 2. ÍNDICES SECUNDÁRIOS
+            -- Índice vital para buscas de produto que ignoram a loja
+            KEY idx_produto (id_produto),
+            
+            -- Outros índices dimensionais
+            KEY idx_marca (id_marca),
+            KEY idx_fabricante (id_fabricante),
+            KEY idx_grupo (id_grupo_subclasse),
+            KEY idx_fornecedor (id_fornecedor),
+            
+            -- Índice isolado para loja (bom para joins rápidos)
+            KEY idx_loja (loja_cnpj)
+
+        ) ENGINE=InnoDB 
+          DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+          PARTITION BY RANGE (YEAR(Ano_Mes)) (
+            {sql_particoes_dinamicas}
+          );
         """
         cursor.execute(ddl)
 
-        # Monitoramento
-        # (Atenção: removi os ** do DB_CONFIG se você ajustou a classe Monitor como conversamos antes. 
-        # Se não ajustou, mantenha os **). Assumindo a versão corrigida:
+        # Configurações de Carga Rápida
+        cursor.execute("SET unique_checks=0")
+        cursor.execute("SET foreign_key_checks=0")
+        cursor.execute("SET bulk_insert_buffer_size=256*1024*1024") 
+        conn.autocommit = False
+
         monitor = DBMonitor(DB_CONFIG)
         monitor.start(table_name=table_new, total_bytes_csv=tamanho)
 
-        # Carga
-        print("🚚 Carregando dados...")
+        print("🚚 Carregando dados (Stream)...")
         sql_load = f"""
         LOAD DATA LOCAL INFILE '{CSV_PATH}'
         INTO TABLE {table_new}
         FIELDS TERMINATED BY ';' LINES TERMINATED BY '\\n'
         (
-            -- TEM QUE SER A MESMA ORDEM DO DUCKDB
-            id_produto,          -- 1
-            id_marca,            -- 2
-            id_fabricante,       -- 3
-            id_grupo_subclasse,  -- 4
-            id_fornecedor,       -- 5
-            
-            -- Resto...
+            id_produto, 
+            id_marca, 
+            id_fabricante, 
+            id_grupo_subclasse, 
+            id_fornecedor, 
             loja_cnpj, 
             Ano_Mes, 
             acode_val_total, 
@@ -138,31 +177,14 @@ def csv_mariadb():
         """
         cursor.execute(sql_load)
         conn.commit()
-
         monitor.stop()
-        
-        # 1. Otimização de Memória para a Sessão
-        print("🚀 Reservando RAM para ordenação de índices...")
-        cursor.execute("SET SESSION aria_sort_buffer_size = 512 * 1024 * 1024;") 
-        cursor.execute("SET SESSION sort_buffer_size = 512 * 1024 * 1024;")
 
-        # 2. Índices em Bloco
-        print("⚙️ Criando todos os índices em bloco (ALTER TABLE)...")
-        sql_indices = f"""
-        ALTER TABLE {table_new}
-            ADD INDEX idx_produto (id_produto),
-            ADD INDEX idx_marca (id_marca),
-            ADD INDEX idx_fabricante (id_fabricante),
-            ADD INDEX idx_grupo_subclasse (id_grupo_subclasse),
-            ADD INDEX idx_fornecedor (id_fornecedor),
-            ADD INDEX idx_loja_cnpj (loja_cnpj),
-            ADD INDEX idx_Ano_Mes (Ano_Mes);
-        """
-        cursor.execute(sql_indices)
-        print("✅ Índices criados com sucesso.")
+        # Reativa verificações
+        conn.autocommit = True
+        cursor.execute("SET unique_checks=1")
+        cursor.execute("SET foreign_key_checks=1")
 
-        # Swap
-        print("🔄 Trocando tabelas (Blue-Green Deployment)...")
+        print("🔄 Trocando tabelas...")
         cursor.execute(f"SHOW TABLES LIKE '{table_prod}'")
         if cursor.fetchone():
             cursor.execute(f"RENAME TABLE {table_prod} TO {table_old}, {table_new} TO {table_prod}")
@@ -176,11 +198,11 @@ def csv_mariadb():
     except Exception as e:
         print(f"❌ Erro no MariaDB: {e}")
         if conn: 
-            conn.rollback()
+            try: conn.rollback()
+            except: pass
         sys.exit(1)
     finally:
-        if conn: 
-            conn.close()
+        if conn: conn.close()
 
 def limpar_temp():
     print("🧹 [3/4] Limpeza de arquivos temporários...")
@@ -190,8 +212,6 @@ def limpar_temp():
             print("✅ Arquivo removido com sucesso.")
         except Exception as e:
             print(f"⚠️ Aviso: Não foi possível remover o arquivo: {e}")
-    else:
-        print("ℹ️ Nenhum arquivo para limpar.")
 
 def verificar_integridade():
     print("🔍 [4/4] Verificando integridade referencial...")
@@ -210,38 +230,29 @@ def verificar_integridade():
     table_fato = "gold_acode_compras_produto_comercial"
     
     for col_id, table_dim in checks:
+        # CORREÇÃO: Adicionado 'f.' antes de {col_id} no SELECT
         sql = f"""
-            SELECT COUNT(DISTINCT f.{col_id}) 
+            SELECT f.{col_id}
             FROM {table_fato} f
             LEFT JOIN {table_dim} d ON f.{col_id} = d.{col_id}
             WHERE d.{col_id} IS NULL
+            LIMIT 1
         """
-        cursor.execute(sql)
-        orphans = cursor.fetchone()[0]
-        
-        if orphans > 0:
-            print(f"⚠️ ALERTA CRÍTICO: {orphans} IDs de {col_id} na Fato não existem na {table_dim}!")
+        try:
+            cursor.execute(sql)
+            row = cursor.fetchone()
             
-            # Opcional: Mostrar exemplo de ID órfão para você investigar
-            sql_exemplo = f"""
-                SELECT DISTINCT f.{col_id} 
-                FROM {table_fato} f
-                LEFT JOIN {table_dim} d ON f.{col_id} = d.{col_id}
-                WHERE d.{col_id} IS NULL
-                LIMIT 1
-            """
-            cursor.execute(sql_exemplo)
-            ex_id = cursor.fetchone()[0]
-            print(f"Exemplo de Hash órfão: {ex_id}")
-            
-        else:
-            print(f"✅ {col_id}: Integridade 100%.")
+            if row:
+                print(f"⚠️ ALERTA CRÍTICO: Encontrado ID órfão em {col_id}. Exemplo: {row[0]}")
+            else:
+                print(f"✅ {col_id}: Integridade 100%.")
+        except Exception as e:
+            print(f"❌ Erro ao verificar {col_id}: {e}")
             
     conn.close()
 
-# --- ORQUESTRAÇÃO PRINCIPAL ---
 if __name__ == "__main__":
-    duckdb_csv()
-    csv_mariadb()
-    limpar_temp()
+    # duckdb_csv()
+    # csv_mariadb()
+    # limpar_temp()
     verificar_integridade()

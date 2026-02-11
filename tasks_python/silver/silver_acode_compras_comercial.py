@@ -11,6 +11,17 @@ sys.path.append(parent_dir)
 
 from _settings.config import DUCKDB_SECRET_SQL, setup_minio_env
 
+# =============================
+# 🔧 PARÂMETROS DE PROCESSAMENTO
+# =============================
+""" RANGE DE PROCESSAMENTO """
+# ANO_INICIO = 2023
+# ANO_FIM = 2023
+
+""" PARA INCREMENTAL DESCOMENTE AS 2 LINHAS ABAIXO """
+ANO_INICIO = datetime.now().year
+ANO_FIM = datetime.now().year
+
 # 1. Configura ambiente MinIO
 setup_minio_env()
 
@@ -21,10 +32,10 @@ def processar_silver_limpo():
     total_start_time = time.time()
     
     # Define Janela de Tempo
-    ano_atual = datetime.now().year
-    anos_para_processar = [ano_atual - 2, ano_atual - 1, ano_atual] 
-    
-    print(f"🚀 [INIT] Iniciando processamento: {anos_para_processar}")
+    # ano_atual = datetime.now().year
+    anos_para_processar = list(range(ANO_INICIO, ANO_FIM + 1))
+
+    print(f"🚀 [INIT] Processando de {ANO_INICIO} até {ANO_FIM}")
 
     con = duckdb.connect()
     try:
