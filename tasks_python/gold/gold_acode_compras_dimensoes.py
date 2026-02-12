@@ -12,7 +12,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 setup_minio_env()
-S3_BASE = "s3://silver/silver_acode_compras_produto_comercial/**/*.parquet"
+S3_BASE = "s3://silver/silver_acode_compras/**/*.parquet"
 
 DIMENSOES_CONFIG = [
     {
@@ -133,7 +133,7 @@ def csv_mariadb(config, CSV_PATH):
         ddl = f"""
         CREATE TABLE {table_new} (
             {', '.join(colunas_ddl)}
-        ) ENGINE=Aria TRANSACTIONAL=0 ROW_FORMAT=PAGE;
+        ) ENGINE=InnoDB TRANSACTIONAL=0 ROW_FORMAT=PAGE;
         """
         cursor.execute(ddl)
         

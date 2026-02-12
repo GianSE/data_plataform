@@ -11,19 +11,19 @@ sys.path.append(parent_dir)
 
 PY_PATH = "/app/tasks_python/silver"
 
-@standard_flow(name="Silver Acode Compras Comercial")
+@standard_flow(name="Silver Acode Compras")
 def pipeline():
 
     python_task(
-        script_name="silver_acode_compras_comercial", 
+        script_name="silver_acode_compras", 
         python_base_path=PY_PATH
     )
 
 if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
-        entrypoint_name="silver/flow_silver_acode_compras_comercial.py:pipeline",
-        deploy_name="Silver Acode Compras Comercial",
+        entrypoint_name="silver/flow_silver_acode_compras.py:pipeline",
+        deploy_name="Silver Acode Compras",
         tags=["MinIO"],
         cron_schedule="0 5 * * *"
     )

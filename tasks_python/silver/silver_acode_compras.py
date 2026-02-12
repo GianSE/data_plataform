@@ -26,7 +26,7 @@ ANO_FIM = datetime.now().year
 setup_minio_env()
 
 BRONZE_PATH = "s3://bronze/compras-acode/**/*.parquet"
-SILVER_ROOT_PATH = "s3://silver/silver_acode_compras_produto_comercial"
+SILVER_ROOT_PATH = "s3://silver/silver_acode_compras"
 
 def processar_silver_limpo():
     total_start_time = time.time()

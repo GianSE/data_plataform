@@ -17,7 +17,7 @@ setup_minio_env()
 
 # 2. Define o caminho do CSV
 CSV_PATH = get_temp_csv_caminho("carga_gold_final.csv")
-S3_BASE = "s3://silver/silver_acode_compras_produto_comercial/**/*.parquet"
+S3_BASE = "s3://silver/silver_acode_compras/**/*.parquet"
 
 def duckdb_csv():
     print(f"📂 [1/4] Arquivo temporário definido: {CSV_PATH}")
@@ -77,7 +77,7 @@ def csv_mariadb():
         conn = mariadb.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
-        table_prod = "gold_acode_compras_produto_comercial"
+        table_prod = "gold_acode_sellin_comercial"
         table_new = f"{table_prod}_new"
         table_old = f"{table_prod}_old"
 
@@ -209,7 +209,7 @@ def verificar_integridade():
     conn = mariadb.connect(**DB_CONFIG)
     cursor = conn.cursor()
     checks = [("id_produto", "dim_produto_acode")]
-    table_fato = "gold_acode_compras_produto_comercial"
+    table_fato = "gold_acode_sellin_comercial"
     
     for col_id, table_dim in checks:
         sql = f"""
