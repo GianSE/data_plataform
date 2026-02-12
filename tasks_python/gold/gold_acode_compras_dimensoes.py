@@ -133,7 +133,7 @@ def csv_mariadb(config, CSV_PATH):
         ddl = f"""
         CREATE TABLE {table_new} (
             {', '.join(colunas_ddl)}
-        ) ENGINE=InnoDB TRANSACTIONAL=0 ROW_FORMAT=PAGE;
+        ) ENGINE=InnoDB TRANSACTIONAL=0 ROW_FORMAT=DYNAMIC;
         """
         cursor.execute(ddl)
         

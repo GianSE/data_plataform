@@ -16,8 +16,8 @@ ANO_PONTUAL = 2021
 MES_PONTUAL = 9
 
 # usado no modo range
-DATA_INICIO = datetime(2014, 1, 1)
-DATA_FIM = datetime(2019, 12, 1)
+DATA_INICIO = datetime(2026, 1, 1)
+DATA_FIM = datetime(2026, 12, 1)
 
 
 
@@ -173,7 +173,13 @@ def processar_mes_direto(ano, mes_num):
         
         if df_local.height > 0:
             print(f"   Salvando {df_local.height} linhas em: {path_destino}")
-            df_local.write_parquet(path_destino, storage_options=STORAGE_OPTIONS, compression="snappy", row_group_size=500_000)
+            df_local.write_parquet(
+                path_destino, 
+                storage_options=STORAGE_OPTIONS, 
+                compression="zstd",        # <--- Mudou de "snappy" para "zstd"
+                compression_level=3,       # <--- (Opcional) Define o nível. 3 é o padrão equilibrado.
+                row_group_size=100_000     # <--- Sugestão: Alinhe com o DuckDB (era 500k, 100k é melhor para leitura)
+            )
         else:
             print(f"   Aviso: Pasta sem dados para {ano}-{mes_str}.")
 
@@ -198,8 +204,8 @@ def main():
         processar_mes_direto(mes_anterior.year, mes_anterior.month)
 
         # Mês anterior ao anterior
-        mes_anterior_2 = data_atual - relativedelta(months=2)
-        processar_mes_direto(mes_anterior_2.year, mes_anterior_2.month)
+        # mes_anterior_2 = data_atual - relativedelta(months=2)
+        # processar_mes_direto(mes_anterior_2.year, mes_anterior_2.month)
 
     elif MODO == "pontual":
         print(f"Modo PONTUAL -> {ANO_PONTUAL}-{MES_PONTUAL:02d}")

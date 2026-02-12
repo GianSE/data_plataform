@@ -16,7 +16,7 @@ from _settings.config import DUCKDB_SECRET_SQL, setup_minio_env
 # =============================
 """ RANGE DE PROCESSAMENTO """
 # ANO_INICIO = 2023
-# ANO_FIM = 2023
+# ANO_FIM = 2026
 
 """ PARA INCREMENTAL DESCOMENTE AS 2 LINHAS ABAIXO """
 ANO_INICIO = datetime.now().year
@@ -101,7 +101,10 @@ def processar_silver_limpo():
                 
                 con.execute(f"""
                     COPY (SELECT * EXCLUDE(ano) FROM silver_batch) TO '{caminho_final}' (
-                        FORMAT PARQUET, COMPRESSION 'SNAPPY'
+                        FORMAT PARQUET, 
+                        COMPRESSION 'ZSTD',
+                        COMPRESSION_LEVEL 3,
+                        ROW_GROUP_SIZE 100000
                     );
                 """)
             else:

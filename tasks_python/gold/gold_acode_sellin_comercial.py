@@ -208,7 +208,13 @@ def verificar_integridade():
     print("🔍 [4/4] Verificando integridade referencial...")
     conn = mariadb.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    checks = [("id_produto", "dim_produto_acode")]
+    checks = [
+            ("id_produto",         "dim_produto_acode"),
+            ("id_marca",           "dim_marca_acode"),
+            ("id_fabricante",      "dim_fabricante_acode"),
+            ("id_grupo_subclasse", "dim_grupo_subclasse_acode"),
+            ("id_fornecedor",      "dim_fornecedor_acode")
+        ]
     table_fato = "gold_acode_sellin_comercial"
     
     for col_id, table_dim in checks:
@@ -225,7 +231,7 @@ def verificar_integridade():
     conn.close()
 
 if __name__ == "__main__":
-    duckdb_csv()
-    csv_mariadb()
-    limpar_temp()
+    # duckdb_csv()
+    # csv_mariadb()
+    # limpar_temp()
     verificar_integridade()
