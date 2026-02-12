@@ -24,6 +24,6 @@ if __name__ == "__main__":
         pipeline_flow=pipeline,
         entrypoint_name="gold/flow_gold_acode_compras_dimensoes.py:pipeline",
         deploy_name="Gold Acode Compras Dimensoes",
-        tags=["Mariadb", "Comercial Vermelho"],
+        tags=["Mariadb", "Dimensoes"],
         cron_schedule="0 6 * * *"
     )
