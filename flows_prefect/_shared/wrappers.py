@@ -3,7 +3,7 @@ import prefect
 from prefect import task, flow
 
 @task(
-    retries=3, 
+    retries=1, 
     retry_delay_seconds=60, 
     task_run_name="Python: {script_name}"
 )
@@ -32,7 +32,7 @@ def python_task(script_name: str, python_base_path: str):
 def standard_flow(name: str, **kwargs):
     return flow(
         name=name,
-        retries=3,
+        retries=2,
         retry_delay_seconds=60,
         **kwargs
     )

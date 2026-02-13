@@ -51,7 +51,7 @@ def duckdb_csv():
                 CAST(ACODE_Val_Total AS DECIMAL(15,4)) AS acode_val_total,
                 CAST(Qtd_Trib AS INT) AS qtd_trib,
                 now() AS data_atualizacao
-            FROM read_parquet('{S3_BASE}')
+            FROM read_parquet('{S3_BASE}', schema={{'Qtd_Trib': 'BIGINT', 'ACODE_Val_Total': 'DOUBLE'}})
             WHERE ano >= 2023
             ORDER BY Ano_Mes ASC, id_produto ASC, loja_cnpj ASC
         ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
