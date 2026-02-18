@@ -1,79 +1,109 @@
-import duckdb
+import polars as pl
 import mariadb
 import os
 import sys
 import time
+import threading
 from datetime import datetime
 from _utils.monitor import DBMonitor
-from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
+from _settings.config import DB_CONFIG, MINIO_CONFIG, get_temp_csv_caminho
 
-setup_minio_env()
+# --- ATIVA LOGS INTERNOS DO POLARS ---
+# Isso fará o Polars imprimir mensagens sobre a leitura dos arquivos no S3
+os.environ["POLARS_VERBOSE"] = "1"
+
+# Definição de Caminhos
 CSV_PATH = get_temp_csv_caminho("carga_direta_gold.csv")
 S3_SILVER_SOURCE = "s3://silver/silver_plugpharma_vendas/**/*.parquet"
 
-def duckdb_to_csv():
-    print(f"📂 [1/3] Agregando Silver para CSV: {CSV_PATH}")
-    start_duck = time.time()
-    con_duck = duckdb.connect()
+# Configuração do MinIO para o Polars
+STORAGE_OPTIONS = {
+    "endpoint_url": f"http://{MINIO_CONFIG['endpoint']}",
+    "aws_access_key_id": MINIO_CONFIG["access_key"],
+    "aws_secret_access_key": MINIO_CONFIG["secret_key"],
+    "region_name": MINIO_CONFIG["region"],
+    "use_ssl": "false"
+}
+
+# --- FUNÇÃO DO MONITOR VISUAL ---
+def monitorar_crescimento_csv(stop_event):
+    """Fica olhando o arquivo CSV crescer enquanto o Polars trabalha"""
+    print("\n👀 Monitor de disco iniciado...")
+    while not stop_event.is_set():
+        if os.path.exists(CSV_PATH):
+            try:
+                size_mb = os.path.getsize(CSV_PATH) / (1024 * 1024)
+                print(f"\r🐻 Polars trabalhando... CSV Gerado: {size_mb:.2f} MB", end="")
+            except:
+                pass
+        time.sleep(0.5)
+
+def polars_to_csv():
+    print(f"📂 [1/3] Polars: Agregando Silver para CSV: {CSV_PATH}")
+    start_time = time.time()
     
     try:
-        con_duck.execute("INSTALL httpfs; LOAD httpfs;")
-        
-        # -----------------------------------------------------------
-        # 1. CREDENCIAIS E CONEXÃO (Secret + Ajustes Manuais)
-        # -----------------------------------------------------------
-        # Garante que o secret seja recriado se já existir
-        con_duck.execute("DROP SECRET IF EXISTS secret_minio;")
-        con_duck.execute(DUCKDB_SECRET_SQL)
-
-        # Configurações de sessão para garantir conectividade no MinIO (HTTP/IP)
-        con_duck.execute("SET s3_use_ssl=false;")      
-        con_duck.execute("SET s3_url_style='path';")   
-        con_duck.execute("SET http_keep_alive=false;") 
-        
-        con_duck.execute("SET memory_limit='4GB';")
-        
         if os.path.exists(CSV_PATH): os.remove(CSV_PATH)
 
-        # -----------------------------------------------------------
-        # 2. QUERY AGREGADA (HIVE ON / NO CASE)
-        # -----------------------------------------------------------
-        query = f"""
-            COPY (
-                SELECT 
-                    cnpj_loja, 
-                    codigo_interno_produto,
-                    SUM(CAST(qtd_de_produtos AS BIGINT)) as qtd_total_vendida,
-                    SUM(CAST(valor_liquido_total AS DECIMAL(15,2))) as valor_total_liquido,
-                    
-                    -- Como hive_partitioning=1, o 'mes_venda' vem da pasta (ex: '01', '02')
-                    -- Não precisa de tradução CASE WHEN.
-                    strptime(concat(ano_venda, '-', mes_venda, '-01'), '%Y-%m-%d')::DATE as data_venda_mes,
-                    
-                    current_timestamp as data_atualizacao
-                FROM read_parquet(
-                    '{S3_SILVER_SOURCE}', 
-                    hive_partitioning=1,  -- Lê ano e mês das pastas
-                    union_by_name=True    -- Escaneia tudo para detectar o BIGINT (negativos)
-                )
-                WHERE 
-                    cnpj_loja IS NOT NULL 
-                    AND codigo_interno_produto IS NOT NULL
-                    AND ano_venda >= 2022
-                GROUP BY 1, 2, 5
-                ORDER BY 5 ASC, 2 ASC, 1 ASC
-            ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
-        """
+        # 1. Planejamento (Lazy)
+        q = pl.scan_parquet(
+            S3_SILVER_SOURCE,
+            storage_options=STORAGE_OPTIONS,
+            hive_partitioning=True
+        )
+
+        q = (
+            q
+            .with_columns([
+                pl.col("qtd_de_produtos").cast(pl.Int64),
+                pl.col("valor_liquido_total").cast(pl.Float64)
+            ])
+            .filter(
+                (pl.col("cnpj_loja").is_not_null()) &
+                (pl.col("codigo_interno_produto").is_not_null()) &
+                (pl.col("ano_venda") >= 2022)
+            )
+            .group_by(["cnpj_loja", "codigo_interno_produto", "ano_venda", "mes_venda"])
+            .agg([
+                pl.col("qtd_de_produtos").sum().cast(pl.Int64).alias("qtd_total_vendida"),
+                pl.col("valor_liquido_total").sum().cast(pl.Decimal(precision=15, scale=2)).alias("valor_total_liquido")
+            ])
+            .with_columns([
+                pl.date(pl.col("ano_venda"), pl.col("mes_venda").cast(pl.Int8), 1).alias("data_venda_mes"),
+                pl.lit(datetime.now()).alias("data_atualizacao")
+            ])
+            .select([
+                "cnpj_loja", "codigo_interno_produto", "qtd_total_vendida", 
+                "valor_total_liquido", "data_venda_mes", "data_atualizacao"
+            ])
+            .sort(["data_venda_mes", "codigo_interno_produto", "cnpj_loja"])
+        )
+
+        # --- MOSTRA O PLANO DE EXECUÇÃO ---
+        print("\n🗺️  Plano de Execução (Query Plan):")
+        print(q.explain())
+        print("-" * 50)
+
+        # --- INICIO DA THREAD DO MONITOR ---
+        stop_monitor = threading.Event()
+        t = threading.Thread(target=monitorar_crescimento_csv, args=(stop_monitor,))
+        t.start()
+
+        # 2. Execução Real (Streaming)
+        print("🚀 Iniciando processamento de streaming...")
+        q.sink_csv(CSV_PATH, separator=";", include_header=False)
         
-        print("🦆 DuckDB: Executando agregação (Hive=1, Union=True)...")
-        con_duck.execute(query)
-        print(f"✅ [DuckDB] Agregação total concluída em: {time.time() - start_duck:.2f}s")
-            
+        stop_monitor.set()
+        t.join()
+        print("") 
+        
+        print(f"✅ [Polars] Agregação concluída em: {time.time() - start_time:.2f}s")
+
     except Exception as e:
-        print(f"❌ Erro DuckDB: {e}")
+        print(f"\n❌ Erro Polars: {e}")
+        try: stop_monitor.set() 
+        except: pass
         sys.exit(1)
-    finally:
-        con_duck.close()
 
 def csv_to_mariadb():
     if not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0:
@@ -81,7 +111,7 @@ def csv_to_mariadb():
         return
 
     tamanho = os.path.getsize(CSV_PATH)
-    print(f"🐬 [2/3] Iniciando carga no MariaDB: {tamanho / 1e6:.2f} MB")
+    print(f"\n🐬 [2/3] Iniciando carga no MariaDB: {tamanho / 1e6:.2f} MB")
     
     conn_maria = None
     try:
@@ -92,19 +122,11 @@ def csv_to_mariadb():
         table_new = f"{table_main}_new"
         table_old = f"{table_main}_old"
 
-        # ---------------------------------------------------------
-        # Particionamento Dinâmico
-        # ---------------------------------------------------------
         ano_atual = datetime.now().year
         ano_inicio = 2022 
-        
-        particoes_list = []
-        for ano in range(ano_inicio, ano_atual + 2):
-            particoes_list.append(f"PARTITION p{ano} VALUES LESS THAN ({ano + 1})")
-        
+        particoes_list = [f"PARTITION p{ano} VALUES LESS THAN ({ano + 1})" for ano in range(ano_inicio, ano_atual + 2)]
         particoes_list.append("PARTITION pmax VALUES LESS THAN MAXVALUE")
         sql_particoes_dinamicas = ",\n        ".join(particoes_list)
-        # ---------------------------------------------------------
 
         cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
         cursor.execute(f"DROP TABLE IF EXISTS {table_new}")
@@ -113,13 +135,11 @@ def csv_to_mariadb():
             CREATE TABLE {table_new} (
                 cnpj_loja VARCHAR(20) NOT NULL,
                 codigo_interno_produto VARCHAR(10) NOT NULL,
-                qtd_total_vendida INT,
+                qtd_total_vendida BIGINT, 
                 valor_total_liquido DECIMAL(15,2),
                 data_venda_mes DATE NOT NULL,
                 data_atualizacao DATETIME,
-
                 PRIMARY KEY (data_venda_mes, codigo_interno_produto, cnpj_loja),
-
                 KEY idx_loja_data (cnpj_loja, data_venda_mes),
                 KEY idx_join_produto (codigo_interno_produto)
             ) 
@@ -154,7 +174,6 @@ def csv_to_mariadb():
         cursor.execute("SET foreign_key_checks=1")
 
         print("⚙️ Realizando Swap de tabelas...")
-        
         cursor.execute(f"SHOW TABLES LIKE '{table_main}'")
         if cursor.fetchone():
             cursor.execute(f"RENAME TABLE {table_main} TO {table_old}, {table_new} TO {table_main}")
@@ -176,13 +195,10 @@ def csv_to_mariadb():
 
 def limpar_temp():
     if os.path.exists(CSV_PATH):
-        try:
-            os.remove(CSV_PATH)
-            print(f"🧹 [3/3] Arquivo temporário removido.")
-        except Exception as e:
-            print(f"⚠️ Erro ao limpar arquivo: {e}")
+        try: os.remove(CSV_PATH)
+        except: pass
 
 if __name__ == "__main__":
-    duckdb_to_csv()
+    polars_to_csv()
     csv_to_mariadb()
     limpar_temp()

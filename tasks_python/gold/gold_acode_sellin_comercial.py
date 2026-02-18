@@ -27,37 +27,46 @@ def duckdb_csv():
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(DUCKDB_SECRET_SQL)
 
-        # Configurações de memória e cache
+        # Configurações de performance
         con.execute("SET http_keep_alive=false;")
         con.execute("SET preserve_insertion_order=false;") 
-        con.execute("PRAGMA disable_object_cache;") 
 
         print("🦆 DuckDB: Extraindo dados e gerando CSV...")
         
+        # 1. Em vez de con.read_parquet, usamos con.from_parquet
+        # O from_parquet permite passar as configurações de leitura
+        rel = con.from_parquet(S3_BASE, hive_partitioning=True)
+        
+        # 2. Criamos a View. Se os tipos estiverem vindo errados do Parquet, 
+        # faremos o CAST no SELECT logo abaixo, que é mais garantido na v1.4.4
+        rel.create_view("stg_compras")
+
         query = f"""
         COPY (
             SELECT 
-                {sql_gerar_hash_id(['EAN', 'Produto'], 'id_produto')},          -- 1
-                {sql_gerar_hash_id(['Desc_Marca'], 'id_marca')},                -- 2
-                {sql_gerar_hash_id(['Fabricante'], 'id_fabricante')},           -- 3
-                {sql_gerar_hash_id(['Grupo', 'Sub_Classe'], 'id_grupo_subclasse')}, -- 4
-                {sql_gerar_hash_id(['Fornecedor'], 'id_fornecedor')},           -- 5
+                {sql_gerar_hash_id(['EAN', 'Produto'], 'id_produto')},
+                {sql_gerar_hash_id(['Desc_Marca'], 'id_marca')},
+                {sql_gerar_hash_id(['Fabricante'], 'id_fabricante')},
+                {sql_gerar_hash_id(['Grupo', 'Sub_Classe'], 'id_grupo_subclasse')},
+                {sql_gerar_hash_id(['Fornecedor'], 'id_fornecedor')},
                 
-                -- CAMPO NOVO
                 CAST(EAN AS VARCHAR(20)) AS ean,
-                
                 CAST(Loja_CNPJ AS VARCHAR(20)) AS loja_cnpj,
                 CAST(Ano_Mes AS DATE) AS Ano_Mes,
+                
+                -- FORCE OS TIPOS AQUI NO SELECT (SUBSTITUI O PARÂMETRO SCHEMA)
                 CAST(ACODE_Val_Total AS DECIMAL(15,4)) AS acode_val_total,
-                CAST(Qtd_Trib AS INT) AS qtd_trib,
+                CAST(Qtd_Trib AS BIGINT) AS qtd_trib, 
+                
                 now() AS data_atualizacao
-            FROM read_parquet('{S3_BASE}', schema={{'Qtd_Trib': 'BIGINT', 'ACODE_Val_Total': 'DOUBLE'}})
+            FROM stg_compras 
             WHERE ano >= 2023
             ORDER BY Ano_Mes ASC, id_produto ASC, loja_cnpj ASC
         ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
         """
         con.execute(query)
         print("✅ CSV gerado com sucesso.")
+        
     except Exception as e:
         print(f"❌ Erro no DuckDB: {e}")
         sys.exit(1)
