@@ -23,23 +23,27 @@ def duckdb_to_csv():
         
         if os.path.exists(CSV_PATH): os.remove(CSV_PATH)
 
-        # AJUSTE 1: MUDAMOS A ORDEM AQUI!
-        # Agora ordenamos: 5(Data) -> 2(Produto) -> 1(Loja)
-        # Isso prepara o terreno para a nova PK do MariaDB.
+        # -----------------------------------------------------------
+        # SOLUÇÃO INTELIGENTE: union_by_name=True 🧠
+        # 1. Removemos o parâmetro 'schema' (Fim do erro MAP vs STRUCT).
+        # 2. Ativamos 'union_by_name=True'.
+        #    Isso força o DuckDB a escanear TODOS os arquivos. 
+        #    Ele vai encontrar os negativos e ajustar o tipo para BIGINT sozinho.
+        # -----------------------------------------------------------
+        
         query = f"""
             COPY (
                 SELECT 
                     cnpj_loja, 
                     codigo_interno_produto,
-                    -- Recomendação: Use BIGINT aqui também para evitar overflow em somas gigantes
                     SUM(CAST(qtd_de_produtos AS BIGINT)) as qtd_total_vendida,
                     SUM(CAST(valor_liquido_total AS DECIMAL(15,2))) as valor_total_liquido,
                     strptime(concat(ano_venda, '-', mes_venda, '-01'), '%Y-%m-%d')::DATE as data_venda_mes,
                     current_timestamp as data_atualizacao
                 FROM read_parquet(
                     '{S3_SILVER_SOURCE}', 
-                    hive_partitioning=1,
-                    schema={{'qtd_de_produtos': 'BIGINT'}} -- <--- O FIX ESTÁ AQUI
+                    hive_partitioning=1,  -- são as colunas virtuais por partição
+                    union_by_name=True    -- <--- A SALVAÇÃO. Força a unificação correta dos tipos.
                 )
                 WHERE 
                     cnpj_loja IS NOT NULL 
@@ -49,6 +53,8 @@ def duckdb_to_csv():
                 ORDER BY 5 ASC, 2 ASC, 1 ASC
             ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
         """
+        
+        print("🦆 DuckDB: Executando com Auto-Unificação de Schema...")
         con_duck.execute(query)
         print(f"✅ [DuckDB] Agregação total concluída em: {time.time() - start_duck:.2f}s")
             
@@ -76,29 +82,23 @@ def csv_to_mariadb():
         table_old = f"{table_main}_old"
 
         # ---------------------------------------------------------
-        # 0. GERAÇÃO DINÂMICA DE PARTIÇÕES (O Pulo do Gato) 🐱
+        # 0. GERAÇÃO DINÂMICA DE PARTIÇÕES
         # ---------------------------------------------------------
         ano_atual = datetime.now().year
-        ano_inicio = 2022 # Seu ano histórico base
+        ano_inicio = 2022 
         
-        # Cria lista de partições de 2022 até o Ano Atual + 1 (pra garantir virada de ano)
         particoes_list = []
         for ano in range(ano_inicio, ano_atual + 2):
             particoes_list.append(f"PARTITION p{ano} VALUES LESS THAN ({ano + 1})")
         
-        # Adiciona a partição final (obrigatória)
         particoes_list.append("PARTITION pmax VALUES LESS THAN MAXVALUE")
-        
-        # Junta tudo numa string SQL
         sql_particoes_dinamicas = ",\n        ".join(particoes_list)
         
-        print(f"⚙️ Partições geradas dinamicamente:\n        {sql_particoes_dinamicas}")
         # ---------------------------------------------------------
 
         cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
         cursor.execute(f"DROP TABLE IF EXISTS {table_new}")
 
-        # Injetamos a variável {sql_particoes_dinamicas} no final do CREATE
         cursor.execute(f"""
             CREATE TABLE {table_new} (
                 cnpj_loja VARCHAR(20) NOT NULL,
@@ -108,10 +108,8 @@ def csv_to_mariadb():
                 data_venda_mes DATE NOT NULL,
                 data_atualizacao DATETIME,
 
-                -- PRIMARY KEY (Data -> Produto -> Loja)
                 PRIMARY KEY (data_venda_mes, codigo_interno_produto, cnpj_loja),
 
-                -- Índices Secundários
                 KEY idx_loja_data (cnpj_loja, data_venda_mes),
                 KEY idx_join_produto (codigo_interno_produto)
             ) 
@@ -122,7 +120,6 @@ def csv_to_mariadb():
             );
         """)
 
-        # Configurações de performance
         cursor.execute("SET unique_checks=0")
         cursor.execute("SET foreign_key_checks=0")
         cursor.execute("SET bulk_insert_buffer_size=256*1024*1024;") 
