@@ -18,24 +18,26 @@ def duckdb_to_csv():
     
     try:
         con_duck.execute("INSTALL httpfs; LOAD httpfs;")
+        
+        # -----------------------------------------------------------
+        # 1. CREDENCIAIS E CONEXÃO (Secret + Ajustes Manuais)
+        # -----------------------------------------------------------
+        # Garante que o secret seja recriado se já existir
+        con_duck.execute("DROP SECRET IF EXISTS secret_minio;")
         con_duck.execute(DUCKDB_SECRET_SQL)
 
-        con_duck.execute("SET s3_use_ssl=false;")      # OBRIGATÓRIO: Seu MinIO é HTTP, não HTTPS
-        con_duck.execute("SET s3_url_style='path';")   # OBRIGATÓRIO: IPs não suportam subdomínios (bucket.ip)
-        con_duck.execute("SET http_keep_alive=false;") # Opcional: Ajuda a evitar timeouts em conexões instáveis
+        # Configurações de sessão para garantir conectividade no MinIO (HTTP/IP)
+        con_duck.execute("SET s3_use_ssl=false;")      
+        con_duck.execute("SET s3_url_style='path';")   
+        con_duck.execute("SET http_keep_alive=false;") 
         
         con_duck.execute("SET memory_limit='4GB';")
         
         if os.path.exists(CSV_PATH): os.remove(CSV_PATH)
 
         # -----------------------------------------------------------
-        # SOLUÇÃO INTELIGENTE: union_by_name=True 🧠
-        # 1. Removemos o parâmetro 'schema' (Fim do erro MAP vs STRUCT).
-        # 2. Ativamos 'union_by_name=True'.
-        #    Isso força o DuckDB a escanear TODOS os arquivos. 
-        #    Ele vai encontrar os negativos e ajustar o tipo para BIGINT sozinho.
+        # 2. QUERY AGREGADA (HIVE ON / NO CASE)
         # -----------------------------------------------------------
-        
         query = f"""
             COPY (
                 SELECT 
@@ -43,12 +45,16 @@ def duckdb_to_csv():
                     codigo_interno_produto,
                     SUM(CAST(qtd_de_produtos AS BIGINT)) as qtd_total_vendida,
                     SUM(CAST(valor_liquido_total AS DECIMAL(15,2))) as valor_total_liquido,
+                    
+                    -- Como hive_partitioning=1, o 'mes_venda' vem da pasta (ex: '01', '02')
+                    -- Não precisa de tradução CASE WHEN.
                     strptime(concat(ano_venda, '-', mes_venda, '-01'), '%Y-%m-%d')::DATE as data_venda_mes,
+                    
                     current_timestamp as data_atualizacao
                 FROM read_parquet(
                     '{S3_SILVER_SOURCE}', 
-                    hive_partitioning=1,  -- são as colunas virtuais por partição
-                    union_by_name=True    -- <--- A SALVAÇÃO. Força a unificação correta dos tipos.
+                    hive_partitioning=1,  -- Lê ano e mês das pastas
+                    union_by_name=True    -- Escaneia tudo para detectar o BIGINT (negativos)
                 )
                 WHERE 
                     cnpj_loja IS NOT NULL 
@@ -59,7 +65,7 @@ def duckdb_to_csv():
             ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
         """
         
-        print("🦆 DuckDB: Executando com Auto-Unificação de Schema...")
+        print("🦆 DuckDB: Executando agregação (Hive=1, Union=True)...")
         con_duck.execute(query)
         print(f"✅ [DuckDB] Agregação total concluída em: {time.time() - start_duck:.2f}s")
             
@@ -87,7 +93,7 @@ def csv_to_mariadb():
         table_old = f"{table_main}_old"
 
         # ---------------------------------------------------------
-        # 0. GERAÇÃO DINÂMICA DE PARTIÇÕES
+        # Particionamento Dinâmico
         # ---------------------------------------------------------
         ano_atual = datetime.now().year
         ano_inicio = 2022 
@@ -98,7 +104,6 @@ def csv_to_mariadb():
         
         particoes_list.append("PARTITION pmax VALUES LESS THAN MAXVALUE")
         sql_particoes_dinamicas = ",\n        ".join(particoes_list)
-        
         # ---------------------------------------------------------
 
         cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
