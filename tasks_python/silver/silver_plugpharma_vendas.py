@@ -4,7 +4,7 @@ from dateutil.relativedelta import relativedelta
 import os
 
 """ 
-1 - "incremental"   (reescreve o mes atual e os 2 meses anteriores) 
+1 - "incremental"   (reescreve o mes atual e o 1 mes anterior) 
 2 - "range"         (reescreve todos os parquet da data_inio a data_fim)
 3 - "pontual"       (reescreve um parquet em específico para tratar erros de envio)
 """
@@ -16,7 +16,7 @@ ANO_PONTUAL = 2021
 MES_PONTUAL = 9
 
 # usado no modo range
-DATA_INICIO = datetime(2026, 1, 1)
+DATA_INICIO = datetime(2014, 1, 1)
 DATA_FIM = datetime(2026, 12, 1)
 
 
@@ -64,15 +64,15 @@ SCHEMA_TARGET = {
     'erp_loja': pl.Utf8, 'cnpj_loja': pl.Utf8, 'razao_social_loja': pl.Utf8,
     'ultima_data_movimentacao_loja': pl.Date,
     'cargo_colaborador': pl.Utf8, 'nome_colaborador': pl.Utf8, 'cpf_colaborador': pl.Utf8,
-    'ano_venda': pl.Int16, 'mes_ano_venda': pl.Utf8, 'mes_venda': pl.Utf8,
-    'dia_mes_venda': pl.Utf8, 'dia_venda': pl.Int16, 'hora_venda': pl.Int16,
+    'ano_venda': pl.Int64, 'mes_ano_venda': pl.Utf8, 'mes_venda': pl.Utf8,
+    'dia_mes_venda': pl.Utf8, 'dia_venda': pl.Int64, 'hora_venda': pl.Int64,
     'cnpj_fabricante': pl.Utf8, 'razao_social_fabricante': pl.Utf8, 'nome_fantasia_fabricante': pl.Utf8,
     'grupo_principal_produto': pl.Utf8, 'tipo_de_produto': pl.Utf8,
     'tipo_de_lista_produto': pl.Utf8, 'descricao_produto': pl.Utf8, 'apresentacao_produto': pl.Utf8, 
     'codigo_interno_produto': pl.Utf8, 'GTIN': pl.Utf8,
     'codigo_de_barras_normalizado_produto': pl.Utf8,
     'pbm': pl.Utf8, 'tipo_de_pessoa_cliente': pl.Utf8,
-    'uf_cliente': pl.Utf8, 'cidade_cliente': pl.Utf8, 'sexo_cliente': pl.Utf8, 'idade_cliente': pl.Int16,
+    'uf_cliente': pl.Utf8, 'cidade_cliente': pl.Utf8, 'sexo_cliente': pl.Utf8, 'idade_cliente': pl.Int64,
     'nome_cliente': pl.Utf8, 'cpf_cnpj_cliente': pl.Utf8,
     'telefone_celular_cliente': pl.Utf8, 'telefone_fixo_cliente': pl.Utf8, 'endereco_cliente': pl.Utf8,
     'email_cliente': pl.Utf8, 'data_nascimento_cliente': pl.Date, 'cep_cliente': pl.Utf8,
@@ -119,9 +119,9 @@ def processar_mes_direto(ano, mes_num):
         schema_atual.update(["ano_venda", "mes_venda", "mes_num"])
 
         q = q.with_columns(
-            pl.lit(ano).cast(pl.Int16).alias("ano_venda"),
+            pl.lit(ano).cast(pl.Int64).alias("ano_venda"),
             pl.lit(mes_nome).alias("mes_venda"),
-            pl.lit(mes_num).cast(pl.Int8).alias("mes_num")
+            pl.lit(mes_num).cast(pl.Int64).alias("mes_num")
         )
 
         if "codigo_de_barras_produto" in schema_atual:
@@ -134,13 +134,13 @@ def processar_mes_direto(ano, mes_num):
             pl.datetime(
                 pl.col("ano_venda"),
                 pl.col("mes_num"),
-                pl.col("dia_venda").cast(pl.Int8, strict=False) if "dia_venda" in schema_atual else pl.lit(1),
-                pl.col("hora_venda").cast(pl.Int8, strict=False).fill_null(0) if "hora_venda" in schema_atual else pl.lit(0)
+                pl.col("dia_venda").cast(pl.Int64, strict=False) if "dia_venda" in schema_atual else pl.lit(1),
+                pl.col("hora_venda").cast(pl.Int64, strict=False).fill_null(0) if "hora_venda" in schema_atual else pl.lit(0)
             ).alias("data_venda_completa"),
             pl.date(
                 pl.col("ano_venda"),
                 pl.col("mes_num"),
-                pl.col("dia_venda").cast(pl.Int8, strict=False) if "dia_venda" in schema_atual else pl.lit(1),
+                pl.col("dia_venda").cast(pl.Int64, strict=False) if "dia_venda" in schema_atual else pl.lit(1),
             ).alias("data_venda"),
             pl.lit(datetime.now()).alias("data_insercao")
         ]
