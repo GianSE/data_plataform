@@ -240,7 +240,7 @@ def verificar_integridade():
     conn.close()
 
 if __name__ == "__main__":
-    # duckdb_csv()
-    # csv_mariadb()
-    # limpar_temp()
+    duckdb_csv()
+    csv_mariadb()
+    limpar_temp()
     verificar_integridade()
