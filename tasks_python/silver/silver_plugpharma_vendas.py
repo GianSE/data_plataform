@@ -77,9 +77,9 @@ SCHEMA_TARGET = {
     'telefone_celular_cliente': pl.Utf8, 'telefone_fixo_cliente': pl.Utf8, 'endereco_cliente': pl.Utf8,
     'email_cliente': pl.Utf8, 'data_nascimento_cliente': pl.Date, 'cep_cliente': pl.Utf8,
     'tipo_de_nota': pl.Utf8, 'tipo_de_operacao': pl.Utf8, 'tipo_de_pagamento': pl.Utf8,
-    'qtd_clientes_atendidos': pl.Int32, 
+    'qtd_clientes_atendidos': pl.Int64, 
     'cmv_unitario': pl.Float64, 'cmv_total': pl.Float64,
-    'desconto_total': pl.Float64, 'qtd_de_produtos': pl.Int32, 'qtd_estoque': pl.Int32,
+    'desconto_total': pl.Float64, 'qtd_de_produtos': pl.Int64, 'qtd_estoque': pl.Int64,
     'valor_bruto_total': pl.Float64, 'valor_bruto_unitario': pl.Float64,
     'valor_liquido_total': pl.Float64, 'valor_liquido_unitario': pl.Float64, 
     'data_insercao': pl.Datetime

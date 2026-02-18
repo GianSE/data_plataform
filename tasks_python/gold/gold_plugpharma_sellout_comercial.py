@@ -31,20 +31,21 @@ def duckdb_to_csv():
                 SELECT 
                     cnpj_loja, 
                     codigo_interno_produto,
-                    SUM(CAST(qtd_de_produtos AS INT)) as qtd_total_vendida,
+                    -- Recomendação: Use BIGINT aqui também para evitar overflow em somas gigantes
+                    SUM(CAST(qtd_de_produtos AS BIGINT)) as qtd_total_vendida,
                     SUM(CAST(valor_liquido_total AS DECIMAL(15,2))) as valor_total_liquido,
                     strptime(concat(ano_venda, '-', mes_venda, '-01'), '%Y-%m-%d')::DATE as data_venda_mes,
                     current_timestamp as data_atualizacao
-                FROM read_parquet('{S3_SILVER_SOURCE}', hive_partitioning=1)
+                FROM read_parquet(
+                    '{S3_SILVER_SOURCE}', 
+                    hive_partitioning=1,
+                    schema={{'qtd_de_produtos': 'BIGINT'}} -- <--- O FIX ESTÁ AQUI
+                )
                 WHERE 
                     cnpj_loja IS NOT NULL 
                     AND codigo_interno_produto IS NOT NULL
                     AND ano_venda >= 2022
                 GROUP BY 1, 2, 5
-                -- ORDEM OTIMIZADA PARA PRODUTO:
-                -- 1º Tempo (Data)
-                -- 2º Alta Cardinalidade (Produto)
-                -- 3º Baixa Cardinalidade (Loja)
                 ORDER BY 5 ASC, 2 ASC, 1 ASC
             ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
         """
