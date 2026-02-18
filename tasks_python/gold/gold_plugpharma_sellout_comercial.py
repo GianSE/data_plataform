@@ -19,6 +19,11 @@ def duckdb_to_csv():
     try:
         con_duck.execute("INSTALL httpfs; LOAD httpfs;")
         con_duck.execute(DUCKDB_SECRET_SQL)
+
+        con_duck.execute("SET s3_use_ssl=false;")      # OBRIGATÓRIO: Seu MinIO é HTTP, não HTTPS
+        con_duck.execute("SET s3_url_style='path';")   # OBRIGATÓRIO: IPs não suportam subdomínios (bucket.ip)
+        con_duck.execute("SET http_keep_alive=false;") # Opcional: Ajuda a evitar timeouts em conexões instáveis
+        
         con_duck.execute("SET memory_limit='4GB';")
         
         if os.path.exists(CSV_PATH): os.remove(CSV_PATH)
