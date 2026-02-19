@@ -2,6 +2,8 @@ import duckdb
 import mariadb
 import os
 import sys
+import time
+import threading
 from datetime import datetime
 from _utils.monitor import DBMonitor
 from _utils.hash_generator import sql_gerar_hash_id
@@ -19,8 +21,21 @@ setup_minio_env()
 CSV_PATH = get_temp_csv_caminho("carga_gold_final.csv")
 S3_BASE = "s3://silver/silver_acode_compras/**/*.parquet"
 
+# --- FUNÇÃO DO MONITOR VISUAL ---
+def monitorar_crescimento_csv(stop_event):
+    """Fica olhando o arquivo CSV crescer enquanto o DuckDB trabalha"""
+    print("\n👀 Monitor de disco iniciado...")
+    while not stop_event.is_set():
+        if os.path.exists(CSV_PATH):
+            try:
+                size_mb = os.path.getsize(CSV_PATH) / (1024 * 1024)
+                print(f"\r🦆 DuckDB trabalhando... CSV Gerado: {size_mb:.2f} MB", end="")
+            except: pass
+        time.sleep(5)
+
 def duckdb_csv():
-    print(f"📂 [1/4] Arquivo temporário definido: {CSV_PATH}")
+    print(f"📂 [1/4] DuckDB: Agregando Silver para CSV: {CSV_PATH}")
+    start_time = time.time()
     
     con = duckdb.connect()
     try:
@@ -64,11 +79,21 @@ def duckdb_csv():
             ORDER BY Ano_Mes ASC, id_produto ASC, loja_cnpj ASC
         ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
         """
-        con.execute(query)
-        print("✅ CSV gerado com sucesso.")
+        stop_monitor = threading.Event()
+        t = threading.Thread(target=monitorar_crescimento_csv, args=(stop_monitor,))
+        t.start()
         
+        print("🚀 Iniciando processamento com DuckDB (Out-of-Core)...")
+        con.execute(query)
+        
+        stop_monitor.set()
+        t.join()
+        print(f"\n✅ [DuckDB] Agregação concluída em: {time.time() - start_time:.2f}s")
+
     except Exception as e:
-        print(f"❌ Erro no DuckDB: {e}")
+        print(f"\n❌ Erro DuckDB: {e}")
+        try: stop_monitor.set() 
+        except: pass
         sys.exit(1)
     finally:
         con.close()

@@ -51,7 +51,7 @@ class DBMonitor:
                     # Se der erro pontual, não quebra a thread, só avisa
                     print(f" (Erro leitura: {e})", end="")
 
-                time.sleep(2)
+                time.sleep(5)
 
         except Exception as e:
             print(f"\n⚠️ Erro fatal no monitor: {e}")

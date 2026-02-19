@@ -6,8 +6,15 @@ import time
 import threading
 from datetime import datetime
 from _utils.monitor import DBMonitor
-# ADICIONE O DUCKDB_SECRET_SQL AQUI NO IMPORT
-from _settings.config import DB_CONFIG, MINIO_CONFIG, get_temp_csv_caminho, DUCKDB_SECRET_SQL
+from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
+
+# Para enxergar um diretório acima
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.append(parent_dir)
+
+# 1. Configura o ambiente (MinIO) automaticamente
+setup_minio_env()
 
 # Definição de Caminhos
 CSV_PATH = get_temp_csv_caminho("carga_direta_gold.csv")
@@ -23,7 +30,7 @@ def monitorar_crescimento_csv(stop_event):
                 size_mb = os.path.getsize(CSV_PATH) / (1024 * 1024)
                 print(f"\r🦆 DuckDB trabalhando... CSV Gerado: {size_mb:.2f} MB", end="")
             except: pass
-        time.sleep(0.5)
+        time.sleep(5)
 
 # --- NOVA FUNÇÃO SUBSTITUINDO O POLARS ---
 def duckdb_to_csv():
