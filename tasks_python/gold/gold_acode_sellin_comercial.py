@@ -41,10 +41,12 @@ def duckdb_csv():
     try:
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(DUCKDB_SECRET_SQL)
-
-        # Configurações de performance
-        con.execute("SET http_keep_alive=false;")
-        con.execute("SET preserve_insertion_order=false;") 
+        
+        # --- CONFIGURAÇÕES DE ESTABILIDADE E RECURSOS ---
+        con.execute("SET threads=2;") 
+        con.execute("SET memory_limit='2GB';")
+        con.execute("SET http_keep_alive=false;")     # Essencial para evitar o erro de cast
+        con.execute("SET max_expression_depth=250;")  # Proteção extra para o container
 
         print("🦆 DuckDB: Extraindo dados e gerando CSV...")
         
