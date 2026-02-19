@@ -76,7 +76,6 @@ def polars_to_csv():
                 "cnpj_loja", "codigo_interno_produto", "qtd_total_vendida", 
                 "valor_total_liquido", "data_venda_mes", "data_atualizacao"
             ])
-            .sort(["data_venda_mes", "codigo_interno_produto", "cnpj_loja"])
         )
 
         # --- MOSTRA O PLANO DE EXECUÇÃO ---
