@@ -35,8 +35,15 @@ def duckdb_to_csv():
     con = duckdb.connect()
     try:
         con.execute("INSTALL httpfs; LOAD httpfs;")
-        con.execute(DUCKDB_SECRET_SQL) # Puxa as credenciais do seu config.py
-        con.execute("SET preserve_insertion_order=false;")
+        con.execute(DUCKDB_SECRET_SQL)
+        
+        # --- CONFIGURAÇÕES DE ESTABILIDADE E RECURSOS ---
+        con.execute("SET threads=2;") 
+        con.execute("SET memory_limit='2GB';")
+        con.execute("SET http_keep_alive=false;")     # Essencial para evitar o erro de cast
+        con.execute("SET max_expression_depth=250;")  # Proteção extra para o container
+
+        
         
         # O DuckDB faz exatamente a mesma coisa que o Polars (Group By, Soma, Filtros)
         # mas usa o disco como "Swap" caso a RAM fique cheia!
