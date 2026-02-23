@@ -15,14 +15,14 @@ PY_PATH = "/app/tasks_python/raw"
 def pipeline():
 
     python_task(
-        script_name="acode_compras", 
+        script_name="raw_acode_compras", 
         python_base_path=PY_PATH
     )
 
 if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
-        entrypoint_name="bronze/flow_acode_compras.py:pipeline",
+        entrypoint_name="bronze/flow_raw_acode_compras.py:pipeline",
         deploy_name="Raw Acode Compras",
         tags=["MinIO", "Raw"],
         cron_schedule="0 3 * * *"

@@ -24,6 +24,6 @@ if __name__ == "__main__":
         pipeline_flow=pipeline,
         entrypoint_name="silver/flow_silver_plugpharma_sellout_comercial.py:pipeline",
         deploy_name="Silver Plugpharma Sellout Comercial",
-        tags=["MinIO", "Silver"],
+        tags=["Mariadb", "Fato", "Comercial Vermelho Sellout"],
         cron_schedule="0 5 * * *"
     )

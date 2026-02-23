@@ -23,7 +23,7 @@ if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
         entrypoint_name="silver/flow_silver_acode_sellin_comercial.py:pipeline",
-        deploy_name="Silver Acode Sellin Compras",
+        deploy_name="Silver Acode Sellin Comercial",
         tags=["MinIO", "Silver"],
         cron_schedule="0 5 * * *"
     )
