@@ -17,8 +17,8 @@ sys.path.append(parent_dir)
 setup_minio_env()
 
 # Definição de Caminhos
-CSV_PATH = get_temp_csv_caminho("carga_direta_gold.csv")
-S3_SILVER_SOURCE = "s3://silver/silver_plugpharma_vendas/**/*.parquet"
+CSV_PATH = get_temp_csv_caminho("carga_direta_silver.csv")
+S3_BRONZE_SOURCE = "s3://bronze/bronze_plugpharma_vendas/**/*.parquet"
 
 # --- FUNÇÃO DO MONITOR VISUAL ---
 def monitorar_crescimento_csv(stop_event):
@@ -34,7 +34,7 @@ def monitorar_crescimento_csv(stop_event):
 
 # --- NOVA FUNÇÃO SUBSTITUINDO O POLARS ---
 def duckdb_to_csv():
-    print(f"📂 [1/3] DuckDB: Agregando Silver para CSV: {CSV_PATH}")
+    print(f"📂 [1/3] DuckDB: Agregando BRONZE para CSV: {CSV_PATH}")
     start_time = time.time()
     
     if os.path.exists(CSV_PATH): os.remove(CSV_PATH)
@@ -51,24 +51,38 @@ def duckdb_to_csv():
         con.execute("SET max_expression_depth=250;")  # Proteção extra para o container
 
         
+        # Calcula o ano e mês atual
+        ano_atual = datetime.now().year
+        mes_atual = datetime.now().month
         
-        # O DuckDB faz exatamente a mesma coisa que o Polars (Group By, Soma, Filtros)
-        # mas usa o disco como "Swap" caso a RAM fique cheia!
+        # Calcula o ano e mês anterior (lidando com a virada de ano em janeiro)
+        ano_anterior = ano_atual if mes_atual > 1 else ano_atual - 1
+        mes_anterior = mes_atual - 1 if mes_atual > 1 else 12
+
+        # A query agora filtra EXATAMENTE as partições recentes
         query = f"""
         COPY (
             SELECT 
                 cnpj_loja, 
                 codigo_interno_produto, 
-                SUM(CAST(qtd_de_produtos AS BIGINT)) AS qtd_total_vendida, 
-                SUM(CAST(valor_liquido_total AS DECIMAL(15,2))) AS valor_total_liquido,
-                make_date(CAST(ano_venda AS INTEGER), CAST(mes_venda AS INTEGER), 1) AS data_venda_mes,
-                now() AS data_atualizacao
-            FROM read_parquet('{S3_SILVER_SOURCE}', hive_partitioning=true)
+                COALESCE(SUM(qtd_de_produtos), 0) AS qtd_total_vendida, 
+                COALESCE(SUM(valor_liquido_total), 0.0) AS valor_total_liquido,
+                make_date(ano_hive, mes_hive, 1) AS data_venda_mes,
+                strftime(now(), '%Y-%m-%d %H:%M:%S') AS data_atualizacao
+            FROM read_parquet(
+                '{S3_BRONZE_SOURCE}', 
+                hive_partitioning=true, 
+                hive_types={{'ano_hive': 'INTEGER', 'mes_hive': 'INTEGER'}}
+            )
             WHERE cnpj_loja IS NOT NULL 
               AND codigo_interno_produto IS NOT NULL 
-              AND ano_venda >= 2022
-            GROUP BY cnpj_loja, codigo_interno_produto, ano_venda, mes_venda
-        ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
+              AND (
+                  (ano_hive = {ano_atual} AND mes_hive = {mes_atual})
+                  OR 
+                  (ano_hive = {ano_anterior} AND mes_hive = {mes_anterior})
+              )
+            GROUP BY cnpj_loja, codigo_interno_produto, ano_hive, mes_hive
+        ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE, NULL '\\N');
         """
         
         stop_monitor = threading.Event()
@@ -96,56 +110,26 @@ def csv_to_mariadb():
         return
 
     tamanho = os.path.getsize(CSV_PATH)
-    print(f"\n🐬 [2/3] Iniciando carga no MariaDB: {tamanho / 1e6:.2f} MB")
+    print(f"\n🐬 [2/3] Iniciando carga INCREMENTAL no MariaDB: {tamanho / 1e6:.2f} MB")
     
     conn_maria = None
     try:
         conn_maria = mariadb.connect(**DB_CONFIG)
         cursor = conn_maria.cursor()
-
-        table_main = "gold_plugpharma_sellout_comercial"
-        table_new = f"{table_main}_new"
-        table_old = f"{table_main}_old"
-
-        ano_atual = datetime.now().year
-        ano_inicio = 2022 
-        particoes_list = [f"PARTITION p{ano} VALUES LESS THAN ({ano + 1})" for ano in range(ano_inicio, ano_atual + 2)]
-        particoes_list.append("PARTITION pmax VALUES LESS THAN MAXVALUE")
-        sql_particoes_dinamicas = ",\n        ".join(particoes_list)
-
-        cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
-        cursor.execute(f"DROP TABLE IF EXISTS {table_new}")
-
-        cursor.execute(f"""
-            CREATE TABLE {table_new} (
-                cnpj_loja VARCHAR(20) NOT NULL,
-                codigo_interno_produto VARCHAR(10) NOT NULL,
-                qtd_total_vendida BIGINT, 
-                valor_total_liquido DECIMAL(15,2),
-                data_venda_mes DATE NOT NULL,
-                data_atualizacao DATETIME,
-                PRIMARY KEY (data_venda_mes, codigo_interno_produto, cnpj_loja),
-                KEY idx_loja_data (cnpj_loja, data_venda_mes),
-                KEY idx_join_produto (codigo_interno_produto)
-            ) 
-            ENGINE=InnoDB 
-            DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
-            PARTITION BY RANGE (YEAR(data_venda_mes)) (
-                {sql_particoes_dinamicas}
-            );
-        """)
+        table_main = "silver_plugpharma_sellout_comercial"
 
         cursor.execute("SET unique_checks=0")
         cursor.execute("SET foreign_key_checks=0")
-        cursor.execute("SET bulk_insert_buffer_size=256*1024*1024;") 
+        cursor.execute("SET bulk_insert_buffer_size=268435456;") 
         conn_maria.autocommit = False
 
         monitor = DBMonitor(DB_CONFIG)
-        monitor.start(table_name=table_new, total_bytes_csv=tamanho)
+        monitor.start(table_name=table_main, total_bytes_csv=tamanho)
 
+        # O segredo está aqui: REPLACE INTO TABLE
         sql_load = f"""
             LOAD DATA LOCAL INFILE '{CSV_PATH}'
-            INTO TABLE {table_new}
+            REPLACE INTO TABLE {table_main}
             FIELDS TERMINATED BY ';' LINES TERMINATED BY '\\n'
             (cnpj_loja, codigo_interno_produto, qtd_total_vendida, valor_total_liquido, data_venda_mes, data_atualizacao)
         """
@@ -158,16 +142,7 @@ def csv_to_mariadb():
         cursor.execute("SET unique_checks=1")
         cursor.execute("SET foreign_key_checks=1")
 
-        print("⚙️ Realizando Swap de tabelas...")
-        cursor.execute(f"SHOW TABLES LIKE '{table_main}'")
-        if cursor.fetchone():
-            cursor.execute(f"RENAME TABLE {table_main} TO {table_old}, {table_new} TO {table_main}")
-        else:
-            cursor.execute(f"RENAME TABLE {table_new} TO {table_main}")
-        
-        cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
-        conn_maria.commit() 
-        print(f"✅ Carga MariaDB finalizada!")
+        print(f"✅ Carga Incremental MariaDB finalizada!")
 
     except Exception as e:
         print(f"❌ Erro MariaDB: {e}")

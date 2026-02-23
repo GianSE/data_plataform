@@ -12,7 +12,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 setup_minio_env()
-S3_BASE = "s3://silver/silver_acode_compras/**/*.parquet"
+S3_BASE = "s3://silver/silver_acode_sellin_comercial/**/*.parquet"
 
 DIMENSOES_CONFIG = [
     {

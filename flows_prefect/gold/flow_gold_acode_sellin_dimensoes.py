@@ -11,19 +11,19 @@ sys.path.append(parent_dir)
 
 PY_PATH = "/app/tasks_python/gold"
 
-@standard_flow(name="Gold Plugpharma Sellout Comercial")
+@standard_flow(name="Gold Acode Sellin Dimensoes")
 def pipeline():
     
     python_task(
-        script_name="gold_plugpharma_sellout_comercial", 
+        script_name="gold_acode_sellin_dimensoes", 
         python_base_path=PY_PATH
     )
 
 if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
-        entrypoint_name="gold/flow_gold_plugpharma_sellout_comercial.py:pipeline",
-        deploy_name="Gold Plugpharma Sellout Comercial",
-        tags=["Mariadb", "Comercial Vermelho Sellout"],
+        entrypoint_name="gold/flow_gold_acode_sellin_dimensoes.py:pipeline",
+        deploy_name="Gold Acode Sellin Dimensoes",
+        tags=["Mariadb", "Dimensoes"],
         cron_schedule="0 6 * * *"
     )

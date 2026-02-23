@@ -4,7 +4,7 @@ from dateutil.relativedelta import relativedelta
 import os
 
 """ 
-1 - "incremental"   (reescreve o mes atual e o 1 mes anterior) 
+1 - "incremental"   (reescreve o mes atual e o 2 mes anterior) 
 2 - "range"         (reescreve todos os parquet da data_inio a data_fim)
 3 - "pontual"       (reescreve um parquet em específico para tratar erros de envio)
 """
@@ -30,8 +30,8 @@ STORAGE_OPTIONS = {
     "allow_http": "true"
 }
 
-BUCKET_BRONZE_BASE = "s3://bronze/vendas-plugpharma" 
-BUCKET_SILVER_ROOT = "s3://silver/silver_plugpharma_vendas/"
+BUCKET_RAW_BASE = "s3://raw/plugpharma_vendas" 
+BUCKET_BRONZE_ROOT = "s3://bronze/bronze_plugpharma_vendas/"
 
 # (Mantive seu MAPA_RENOMEAR e SCHEMA_TARGET idênticos)
 MAPA_RENOMEAR = {
@@ -93,9 +93,9 @@ MAPA_MESES_REVERSO = {v: k for k, v in MAPA_MESES.items()}
 
 def processar_mes_direto(ano, mes_num):
     mes_str = f"{mes_num:02d}"
-    path_origem = f"{BUCKET_BRONZE_BASE}/ano={ano}/mes={mes_str}/*.parquet"
+    path_origem = f"{BUCKET_RAW_BASE}/ano_hive={ano}/mes_hive={mes_str}/*.parquet"
     mes_nome = MAPA_MESES_REVERSO.get(mes_num)
-    path_destino = f"{BUCKET_SILVER_ROOT}ano_venda={ano}/mes_venda={mes_str}/part-001.parquet"
+    path_destino = f"{BUCKET_BRONZE_ROOT}ano_hive={ano}/mes_hive={mes_str}/{mes_str}-{ano}.parquet"
     
     print(f"-> Acessando direto: {path_origem}")
 
@@ -204,8 +204,8 @@ def main():
         processar_mes_direto(mes_anterior.year, mes_anterior.month)
 
         # Mês anterior ao anterior
-        # mes_anterior_2 = data_atual - relativedelta(months=2)
-        # processar_mes_direto(mes_anterior_2.year, mes_anterior_2.month)
+        mes_anterior_2 = data_atual - relativedelta(months=2)
+        processar_mes_direto(mes_anterior_2.year, mes_anterior_2.month)
 
     elif MODO == "pontual":
         print(f"Modo PONTUAL -> {ANO_PONTUAL}-{MES_PONTUAL:02d}")

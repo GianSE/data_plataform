@@ -9,21 +9,21 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 
-PY_PATH = "/app/tasks_python/gold"
+PY_PATH = "/app/tasks_python/raw"
 
-@standard_flow(name="Gold Acode Compras Dimensoes")
+@standard_flow(name="Raw Acode Compras")
 def pipeline():
-    
+
     python_task(
-        script_name="gold_acode_compras_dimensoes", 
+        script_name="acode_compras", 
         python_base_path=PY_PATH
     )
 
 if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
-        entrypoint_name="gold/flow_gold_acode_compras_dimensoes.py:pipeline",
-        deploy_name="Gold Acode Compras Dimensoes",
-        tags=["Mariadb", "Dimensoes"],
-        cron_schedule="0 6 * * *"
+        entrypoint_name="bronze/flow_acode_compras.py:pipeline",
+        deploy_name="Raw Acode Compras",
+        tags=["MinIO", "Raw"],
+        cron_schedule="0 3 * * *"
     )

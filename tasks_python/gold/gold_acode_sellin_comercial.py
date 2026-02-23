@@ -19,7 +19,7 @@ setup_minio_env()
 
 # 2. Define o caminho do CSV
 CSV_PATH = get_temp_csv_caminho("carga_gold_final.csv")
-S3_BASE = "s3://silver/silver_acode_compras/**/*.parquet"
+S3_BASE = "s3://silver/silver_acode_sellin_compras/**/*.parquet"
 
 # --- FUNÇÃO DO MONITOR VISUAL ---
 def monitorar_crescimento_csv(stop_event):
@@ -34,9 +34,11 @@ def monitorar_crescimento_csv(stop_event):
         time.sleep(5)
 
 def duckdb_csv():
-    print(f"📂 [1/4] DuckDB: Agregando Silver para CSV: {CSV_PATH}")
+    print(f"📂 [1/4] DuckDB: Agregando Silver para CSV (INCREMENTAL): {CSV_PATH}")
     start_time = time.time()
     
+    if os.path.exists(CSV_PATH): os.remove(CSV_PATH)
+
     con = duckdb.connect()
     try:
         con.execute("INSTALL httpfs; LOAD httpfs;")
@@ -45,18 +47,25 @@ def duckdb_csv():
         # --- CONFIGURAÇÕES DE ESTABILIDADE E RECURSOS ---
         con.execute("SET threads=2;") 
         con.execute("SET memory_limit='2GB';")
-        con.execute("SET http_keep_alive=false;")     # Essencial para evitar o erro de cast
-        con.execute("SET max_expression_depth=250;")  # Proteção extra para o container
+        con.execute("SET http_keep_alive=false;")
+        con.execute("SET max_expression_depth=250;")
 
         print("🦆 DuckDB: Extraindo dados e gerando CSV...")
         
-        # 1. Em vez de con.read_parquet, usamos con.from_parquet
-        # O from_parquet permite passar as configurações de leitura
+        # Lê a base com suporte a partições
         rel = con.from_parquet(S3_BASE, hive_partitioning=True)
-        
-        # 2. Criamos a View. Se os tipos estiverem vindo errados do Parquet, 
-        # faremos o CAST no SELECT logo abaixo, que é mais garantido na v1.4.4
         rel.create_view("stg_compras")
+
+        # ---------------------------------------------------------
+        # LÓGICA INCREMENTAL DE DATAS
+        # ---------------------------------------------------------
+        ano_atual = datetime.now().year
+        mes_atual = datetime.now().month
+        ano_anterior = ano_atual if mes_atual > 1 else ano_atual - 1
+        mes_anterior = mes_atual - 1 if mes_atual > 1 else 12
+        
+        # Cria a data de corte: Primeiro dia do mês anterior (ex: '2026-01-01')
+        data_corte = f"{ano_anterior}-{mes_anterior:02d}-01"
 
         query = f"""
         COPY (
@@ -67,25 +76,24 @@ def duckdb_csv():
                 {sql_gerar_hash_id(['Grupo', 'Sub_Classe'], 'id_grupo_subclasse')},
                 {sql_gerar_hash_id(['Fornecedor'], 'id_fornecedor')},
                 
-                CAST(EAN AS VARCHAR(20)) AS ean,
-                CAST(Loja_CNPJ AS VARCHAR(20)) AS loja_cnpj,
-                CAST(Ano_Mes AS DATE) AS Ano_Mes,
+                EAN AS ean,
+                Loja_CNPJ AS loja_cnpj,
+                Ano_Mes AS Ano_Mes,
                 
-                -- FORCE OS TIPOS AQUI NO SELECT (SUBSTITUI O PARÂMETRO SCHEMA)
-                CAST(ACODE_Val_Total AS DECIMAL(15,4)) AS acode_val_total,
-                CAST(Qtd_Trib AS BIGINT) AS qtd_trib, 
+                ACODE_Val_Total AS acode_val_total,
+                Qtd_Trib AS qtd_trib, 
                 
-                now() AS data_atualizacao
+                strftime(now(), '%Y-%m-%d %H:%M:%S') AS data_atualizacao
             FROM stg_compras 
-            WHERE ano >= 2023
+            WHERE Ano_Mes >= CAST('{data_corte}' AS DATE)
             ORDER BY Ano_Mes ASC, id_produto ASC, loja_cnpj ASC
-        ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE);
+        ) TO '{CSV_PATH}' (FORMAT CSV, DELIMITER ';', HEADER FALSE, NULL '\\N');
         """
         stop_monitor = threading.Event()
         t = threading.Thread(target=monitorar_crescimento_csv, args=(stop_monitor,))
         t.start()
         
-        print("🚀 Iniciando processamento com DuckDB (Out-of-Core)...")
+        print(f"🚀 Iniciando processamento a partir de {data_corte}...")
         con.execute(query)
         
         stop_monitor.set()
@@ -101,12 +109,12 @@ def duckdb_csv():
         con.close()
 
 def csv_mariadb():
-    if not os.path.exists(CSV_PATH):
-        print("❌ Erro: Arquivo CSV não encontrado. Pulo etapa.")
+    if not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0:
+        print("❌ Erro: Arquivo CSV não encontrado ou vazio. Pulo etapa.")
         return
 
     tamanho = os.path.getsize(CSV_PATH)
-    print(f"🐬 [2/4] Iniciando carga no MariaDB: {tamanho / 1e6:.2f} MB")
+    print(f"🐬 [2/4] Iniciando carga INCREMENTAL no MariaDB: {tamanho / 1e6:.2f} MB")
 
     conn = None
     try:
@@ -114,8 +122,6 @@ def csv_mariadb():
         cursor = conn.cursor()
 
         table_prod = "gold_acode_sellin_comercial"
-        table_new = f"{table_prod}_new"
-        table_old = f"{table_prod}_old"
 
         # ---------------------------------------------------------
         # GERAÇÃO DINÂMICA DE PARTIÇÕES
@@ -129,13 +135,10 @@ def csv_mariadb():
         sql_particoes_dinamicas = ",\n            ".join(particoes_list)
         # ---------------------------------------------------------
 
-        cursor.execute(f"DROP TABLE IF EXISTS {table_new}")
-        cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
-
-        print(f"🔨 Criando tabela com EAN: {table_new}")
-        
+        # Usa o IF NOT EXISTS para criar a tabela apenas se for a primeira rodada
+        print(f"🔨 Garantindo a estrutura da tabela: {table_prod}")
         ddl = f"""
-        CREATE TABLE {table_new} (
+        CREATE TABLE IF NOT EXISTS {table_prod} (
             -- Chaves
             id_produto VARCHAR(16) NOT NULL,
             id_marca VARCHAR(16) NOT NULL,
@@ -153,15 +156,12 @@ def csv_mariadb():
             qtd_trib INT, 
             data_atualizacao DATETIME,
 
-            -- PK (Mantém a lógica robusta)
+            -- PK (Garante o funcionamento do REPLACE)
             PRIMARY KEY (Ano_Mes, id_produto, loja_cnpj),
 
             -- Índices
             KEY idx_produto (id_produto),
-            
-            -- ÍNDICE VITAL PARA SUA UNIFICAÇÃO
             KEY idx_ean (ean),
-            
             KEY idx_marca (id_marca),
             KEY idx_fabricante (id_fabricante),
             KEY idx_grupo (id_grupo_subclasse),
@@ -178,16 +178,18 @@ def csv_mariadb():
 
         cursor.execute("SET unique_checks=0")
         cursor.execute("SET foreign_key_checks=0")
-        cursor.execute("SET bulk_insert_buffer_size=256*1024*1024") 
+        cursor.execute("SET bulk_insert_buffer_size=268435456") # Valor calculado corrigido
         conn.autocommit = False
 
         monitor = DBMonitor(DB_CONFIG)
-        monitor.start(table_name=table_new, total_bytes_csv=tamanho)
+        monitor.start(table_name=table_prod, total_bytes_csv=tamanho)
 
         print("🚚 Carregando dados...")
+        
+        # O pulo do gato: REPLACE INTO na tabela principal
         sql_load = f"""
         LOAD DATA LOCAL INFILE '{CSV_PATH}'
-        INTO TABLE {table_new}
+        REPLACE INTO TABLE {table_prod}
         FIELDS TERMINATED BY ';' LINES TERMINATED BY '\\n'
         (
             id_produto, 
@@ -213,16 +215,7 @@ def csv_mariadb():
         cursor.execute("SET unique_checks=1")
         cursor.execute("SET foreign_key_checks=1")
 
-        print("🔄 Trocando tabelas...")
-        cursor.execute(f"SHOW TABLES LIKE '{table_prod}'")
-        if cursor.fetchone():
-            cursor.execute(f"RENAME TABLE {table_prod} TO {table_old}, {table_new} TO {table_prod}")
-        else:
-            cursor.execute(f"RENAME TABLE {table_new} TO {table_prod}")
-        
-        cursor.execute(f"DROP TABLE IF EXISTS {table_old}")
-        conn.commit()
-        print("🏁 Carga finalizada!")
+        print("🏁 Carga Incremental finalizada!")
 
     except Exception as e:
         print(f"❌ Erro no MariaDB: {e}")
@@ -240,7 +233,6 @@ def limpar_temp():
         except Exception: pass
 
 def verificar_integridade():
-    # Mantive igual, pois a integridade continua sendo checada pelo ID hash
     print("🔍 [4/4] Verificando integridade referencial...")
     conn = mariadb.connect(**DB_CONFIG)
     cursor = conn.cursor()
