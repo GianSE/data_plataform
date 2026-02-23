@@ -22,7 +22,7 @@ def pipeline():
 if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
-        entrypoint_name="bronze/flow_raw_acode_compras.py:pipeline",
+        entrypoint_name="raw/flow_raw_acode_compras.py:pipeline",
         deploy_name="Raw Acode Compras",
         tags=["MinIO", "Raw"],
         cron_schedule="0 3 * * *"
