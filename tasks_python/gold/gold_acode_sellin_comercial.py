@@ -19,7 +19,7 @@ setup_minio_env()
 
 # 2. Define o caminho do CSV
 CSV_PATH = get_temp_csv_caminho("carga_gold_final.csv")
-S3_BASE = "s3://silver/silver_acode_sellin_compras/**/*.parquet"
+S3_BASE = "s3://silver/silver_acode_sellin_comercial/**/*.parquet"
 
 # --- FUNÇÃO DO MONITOR VISUAL ---
 def monitorar_crescimento_csv(stop_event):
