@@ -24,6 +24,6 @@ if __name__ == "__main__":
         pipeline_flow=pipeline,
         entrypoint_name="gold/flow_gold_acode_sellin_comercial.py:pipeline",
         deploy_name="Gold Acode Sellin Comercial",
-        tags=["Mariadb", "Fato", "Comercial Vermelho Sellin"],
-        cron_schedule="0 6 * * *"
+        tags=["mariadb", "fat", "Comercial Vermelho Sellin"],
+        cron_schedule="0 5 * * *"
     )

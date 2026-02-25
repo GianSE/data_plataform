@@ -24,6 +24,6 @@ if __name__ == "__main__":
         pipeline_flow=pipeline,
         entrypoint_name="silver/flow_silver_acode_sellin_comercial.py:pipeline",
         deploy_name="Silver Acode Sellin Comercial",
-        tags=["MinIO", "Silver", "Comercial Vermelho Sellin"],
-        cron_schedule="0 5 * * *"
+        tags=["minio", "silver"],
+        cron_schedule="30 4 * * *"
     )

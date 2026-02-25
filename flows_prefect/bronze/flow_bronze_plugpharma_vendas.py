@@ -24,6 +24,6 @@ if __name__ == "__main__":
         pipeline_flow=pipeline,
         entrypoint_name="bronze/flow_bronze_plugpharma_vendas.py:pipeline",
         deploy_name="Bronze Plugpharma Vendas",
-        tags=["MinIO", "Bronze"],
-        cron_schedule="0 5 * * *"
+        tags=["minio", "bronze"],
+        cron_schedule="30 4 * * *"
     )
