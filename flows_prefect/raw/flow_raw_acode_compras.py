@@ -25,5 +25,5 @@ if __name__ == "__main__":
         entrypoint_name="raw/flow_raw_acode_compras.py:pipeline",
         deploy_name="Raw Acode Compras",
         tags=["MinIO", "Raw"],
-        cron_schedule="0 9 * * *"
+        cron_schedule="15 9 * * *"
     )
