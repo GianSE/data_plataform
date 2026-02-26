@@ -41,7 +41,7 @@ jobs:
           
           # 4. Cria o .env.worker com o IP
           $WorkerContent = "WORKER_NAME=worker-$IP"
-          [System.IO.File]::WriteAllText("$PWD/prefect-worker/.env.worker", $WorkerContent)
+          [System.IO.File]::WriteAllText("$PWD/_ops/prefect-worker/.env.worker", $WorkerContent)
           
           Write-Host "✅ Configuracoes injetadas para o worker-$IP"
         env:
