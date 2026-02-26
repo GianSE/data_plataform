@@ -106,6 +106,8 @@ data_plataform/
     └── prefect-worker/
         ├── Dockerfile               # Imagem baseada em prefecthq/prefect:3.6.13-python3.12
         ├── docker-compose.yml       # Serviço do worker com volumes e env
+        ├── .env.worker              # Nome do worker local (não versionado)
+        ├── .env.worker.example      # Exemplo do .env.worker
         └── requirements.txt         # Dependências do ambiente de execução
 ```
 
@@ -167,7 +169,21 @@ copy tasks_python\_settings\.env.example tasks_python\_settings\.env
 # Edite o .env com as credenciais do MariaDB e MinIO
 ```
 
-### 2. Subir o Worker Local
+### 2. Nomear o Worker Local
+
+```bash
+copy _ops\prefect-worker\.env.worker.example _ops\prefect-worker\.env.worker
+```
+
+Edite `_ops/prefect-worker/.env.worker` e defina um nome único para seu notebook:
+
+```dotenv
+WORKER_NAME=notebook-gian-124
+```
+
+Esse nome identifica o seu worker local dentro do **work pool compartilhado** no Prefect Server. Cada desenvolvedor deve usar um nome diferente para que o Prefect saiba qual máquina executou cada flow run. Nos servidores de produção, esse nome é gerado automaticamente a partir do IP (`worker-192.168.21.xxx`), mas localmente você precisa definir manualmente.
+
+### 3. Subir o Worker Local
 
 ```bash
 python _ops/deploy/rebuild_worker.py
@@ -175,7 +191,7 @@ python _ops/deploy/rebuild_worker.py
 
 Isso constrói a imagem `custom-prefect-worker` e sobe o container com as mesmas dependências, volumes e variáveis de ambiente que os servidores de produção. O código-fonte do projeto é montado em `/app` via bind mount, então qualquer alteração local já é refletida no container.
 
-### 3. Rodar o Setup de Desenvolvimento
+### 4. Rodar o Setup de Desenvolvimento
 
 ```bash
 python _ops/deploy/setup_dev.py
