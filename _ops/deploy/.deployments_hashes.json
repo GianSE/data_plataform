@@ -1,0 +1,7 @@
+{
+    "flow_acode_para_parquet.py": "9b30e8a5a8b892dd6222b45b99cb2635",
+    "flow_bronze_acode_compras.py": "59bfe43cc150072edf9cc8a82c153074",
+    "flow_gold_acode_compras_comercial.py": "b1431fb211ea4a5ea7b0be3362bdc7e3",
+    "flow_gold_acode_dimensoes_comercial.py": "de9b78ccebfe7ca324e97c26eaf5fc91",
+    "flow_silver_acode_compras_comercial.py": "a570a090c6f64c55ccd1741a7e0f300f"
+}

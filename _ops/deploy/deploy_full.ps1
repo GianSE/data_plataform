@@ -83,7 +83,7 @@ foreach ($Server in $ListaServidores) {
         # --- ETAPA 2: REBUILD WORKER ---
         Write-Host "`n[$ServerName] [INFRA] [2/3] Verificando Docker (Rebuild Worker)..." -ForegroundColor Cyan
         
-        cmd /c "python .\_ops\rebuild_worker.py"
+        cmd /c "python .\_ops\deploy\rebuild_worker.py"
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[$ServerName] [ERRO] Falha critica na Infraestrutura. Deploy abortado." -ForegroundColor Red
@@ -94,7 +94,7 @@ foreach ($Server in $ListaServidores) {
         # --- ETAPA 3: DEPLOY ALL ---
         Write-Host "`n[$ServerName] [FLOWS] [3/3] Registrando Flows (Deploy All)..." -ForegroundColor Cyan
         
-        cmd /c "python .\_ops\rebuild_deployments.py"
+        cmd /c "python .\_ops\deploy\rebuild_deployments.py"
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "[$ServerName] [ERRO] Falha ao registrar flows." -ForegroundColor Red

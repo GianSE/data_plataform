@@ -9,21 +9,21 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.append(parent_dir)
 
 
-PY_PATH = "/app/tasks_python/silver"
+PY_PATH = "/app/tasks_python/2_silver"
 
-@standard_flow(name="Silver Acode Sellin Comercial")
+@standard_flow(name="Silver Plugpharma Sellout Comercial")
 def pipeline():
 
     python_task(
-        script_name="silver_acode_sellin_comercial", 
+        script_name="silver_plugpharma_sellout_comercial", 
         python_base_path=PY_PATH
     )
 
 if __name__ == "__main__":
     gerenciar_run(
         pipeline_flow=pipeline,
-        entrypoint_name="silver/flow_silver_acode_sellin_comercial.py:pipeline",
-        deploy_name="Silver Acode Sellin Comercial",
-        tags=["minio", "silver"],
-        cron_schedule="30 4 * * *"
+        entrypoint_name="2_silver/flow_silver_plugpharma_sellout_comercial.py:pipeline",
+        deploy_name="Silver Plugpharma Sellout Comercial",
+        tags=["mariadb", "Comercial Vermelho Sellout"],
+        cron_schedule="0 5 * * *"
     )

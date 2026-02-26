@@ -40,8 +40,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 
 FILES_TO_MONITOR = [
-    os.path.join(project_root, "prefect-worker", "requirements.txt"),
-    os.path.join(project_root, "prefect-worker", "Dockerfile")
+    os.path.join(project_root, "_ops", "prefect-worker", "requirements.txt"),
+    os.path.join(project_root, "_ops", "prefect-worker", "Dockerfile")
 ]
 
 def get_file_hash(path):
@@ -94,7 +94,7 @@ def graceful_drain(color, timeout=None):
         time.sleep(5)
 
 def rebuild_blue_green():
-    docker_dir = os.path.join(project_root, "prefect-worker")
+    docker_dir = os.path.join(project_root, "_ops", "prefect-worker")
     os.chdir(docker_dir)
 
     needs_build, new_hashes = check_if_build_needed()
@@ -118,7 +118,7 @@ def rebuild_blue_green():
         print(f"[BUILD] Gerando nova imagem: {image_name}")
         
         # Adicionei --load para garantir que a imagem saia do cache para o registro local
-        cmd_build = f"{DOCKER_CMD} build --load -t {image_name} -f Dockerfile .."
+        cmd_build = f"{DOCKER_CMD} build --load -t {image_name} -f Dockerfile ../.."
         if not run_command(cmd_build, "Docker Build"): sys.exit(1)
         save_new_hashes(new_hashes)
 

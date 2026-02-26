@@ -2,12 +2,12 @@ services:
   prefect-worker:
     image: custom-prefect-worker:3.6.13-python3.12
     build:
-      context: ..                       
-      dockerfile: prefect-worker/Dockerfile
+      context: ../..       # <--- Sobe de prefect-worker -> _ops -> raiz                
+      dockerfile: _ops/prefect-worker/Dockerfile # <--- Caminho a partir da raiz
     restart: always
     volumes:
-      - ../:/app
-      - C:/deploy_metadata:/app/_metadata
+      - ../../:/app                        # <--- Mapeia a raiz do projeto para /app
+      - C:/deploy_metadata:/app/_metadata  # <--- Mapeia a pasta de metadata para dentro do container
     env_file:
       - .env.worker
     environment:

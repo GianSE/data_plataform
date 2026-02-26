@@ -1,6 +1,6 @@
 # 1. Identificação Inicial
 Write-Host "[AGENT] Iniciando Deploy Local na maquina: $env:COMPUTERNAME" -ForegroundColor Cyan
-Set-Location $PSScriptRoot\..
+Set-Location $PSScriptRoot\..\..
 
 # 2. Configuração do Caminho de Metadados (Persistente fora da pasta do Git)
 $MetadataPath = "C:\deploy_metadata\state.json"
@@ -19,7 +19,7 @@ elseif ($env:COMPUTERNAME -eq "APFD23003") {
 }
 
 # 4. Checagem de Cache (Hash do requirements.txt)
-$CurrentHash = (Get-FileHash "prefect-worker/requirements.txt").Hash
+$CurrentHash = (Get-FileHash "_ops/prefect-worker/requirements.txt").Hash
 $SkipPip = $false
 
 if (Test-Path $MetadataPath) {
@@ -39,10 +39,10 @@ if ($SkipPip) {
 
 # Roda os scripts de infra e flows
 Write-Host "[INFRA] Verificando Containers e Imagens..." -ForegroundColor Yellow
-& $PythonExe .\_ops\rebuild_worker.py
+& $PythonExe .\_ops\deploy\rebuild_worker.py
 
 Write-Host "`n[FLOWS] Registrando deployments..." -ForegroundColor Yellow
-& $PythonExe .\_ops\rebuild_deployments.py
+& $PythonExe .\_ops\deploy\rebuild_deployments.py
 
 # 6. Atualização do Estado (Apenas se o deploy teve sucesso)
 if ($LASTEXITCODE -eq 0) {

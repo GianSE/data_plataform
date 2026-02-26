@@ -6,10 +6,11 @@ import sys
 # --- CONFIGURAÇÃO DE CAMINHOS ---
 # Pega o diretório onde ESTE script está (_ops)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-# Pega o diretório pai (raiz do projeto)
-project_root = os.path.dirname(current_dir)
+project_root = os.path.dirname(os.path.dirname(current_dir)) # <--- Duplo dirname
 
-hooks_src = os.path.join(current_dir, "hooks")          # _ops/hooks
+# A pasta hooks não está no parent do projeto, está dentro de _ops
+ops_dir = os.path.dirname(current_dir)
+hooks_src = os.path.join(ops_dir, "hooks")          # aponta para _ops/hooks
 hooks_dst = os.path.join(project_root, ".git", "hooks") # .git/hooks
 
 # Lista de hooks para ativar

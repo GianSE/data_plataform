@@ -5,8 +5,7 @@ import sys
 import time
 import threading
 from datetime import datetime
-from _utils.monitor import DBMonitor
-from _utils.hash_generator import sql_gerar_hash_id
+from tasks_python._utils.monitor_mariadb import DBMonitor
 from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 # Para enxergar um diretório acima
@@ -20,6 +19,25 @@ setup_minio_env()
 # 2. Define o caminho do CSV
 CSV_PATH = get_temp_csv_caminho("carga_gold_final.csv")
 S3_BASE = "s3://silver/silver_acode_sellin_comercial/**/*.parquet"
+
+def sql_gerar_hash_id(colunas, alias=None):
+    """
+    Gera Hash ID como VARCHAR(16).
+    - Seguro contra arredondamento do Power BI.
+    - Metade do tamanho do MD5 tradicional.
+    - Zero risco de Overflow.
+    """
+    # 1. Limpeza (Sua lógica padrão)
+    cols_safe = [f"upper(coalesce(nullif(trim(CAST(\"{c}\" AS VARCHAR)), ''), 'ND'))" for c in colunas]
+    cols_str = ", ".join(cols_safe)
+    
+    # 2. Gera MD5 e corta os primeiros 16 caracteres
+    # Retorna TEXTO, não número.
+    sql = f"CAST(substr(md5(concat_ws('_', {cols_str})), 1, 16) AS VARCHAR(16))"
+    
+    if alias:
+        return f"{sql} AS {alias}"
+    return sql
 
 # --- FUNÇÃO DO MONITOR VISUAL ---
 def monitorar_crescimento_csv(stop_event):

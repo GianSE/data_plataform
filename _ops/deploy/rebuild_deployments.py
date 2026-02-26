@@ -25,7 +25,7 @@ if not IN_DOCKER:
             raise Exception("Nenhum container do worker encontrado rodando.")
 
         # Executa o próprio script dentro do container
-        subprocess.run(["docker", "exec", "-t", container_id, "python", "/app/_ops/rebuild_deployments.py"], check=True)
+        subprocess.run(["docker", "exec", "-t", container_id, "python", "/app/_ops/deploy/rebuild_deployments.py"], check=True)
     except Exception as e:
         print(f"\n[ERRO] Falha ao redirecionar: {e}")
     sys.exit(0)

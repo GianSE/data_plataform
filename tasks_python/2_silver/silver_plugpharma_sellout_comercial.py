@@ -5,7 +5,7 @@ import sys
 import time
 import threading
 from datetime import datetime
-from _utils.monitor import DBMonitor
+from tasks_python._utils.monitor_mariadb import DBMonitor
 from _settings.config import DB_CONFIG, DUCKDB_SECRET_SQL, setup_minio_env, get_temp_csv_caminho
 
 # Para enxergar um diretório acima
