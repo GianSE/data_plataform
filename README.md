@@ -166,8 +166,18 @@ O ambiente de desenvolvimento local **não usa venv**. Ele roda dentro de um con
 
 ```bash
 copy tasks_python\_settings\.env.example tasks_python\_settings\.env
-# Edite o .env com as credenciais do MariaDB e MinIO
 ```
+
+Edite `tasks_python/_settings/.env` com as credenciais reais do MariaDB e MinIO. O arquivo `.env.example` já vem com os nomes das variáveis esperadas:
+
+| Variável | Descrição |
+|---|---|
+| `DB_HOST` | IP do servidor MariaDB |
+| `DB_USER` / `DB_PASSWORD` | Credenciais do banco |
+| `DB_NAME` | Nome do database |
+| `MINIO_ENDPOINT` | IP:Porta do MinIO (ex: `192.168.21.251:9000`) |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | Credenciais do MinIO |
+| `PYTHONPATH` | Já preenchido no exemplo — caminhos dentro do container, **não alterar** |
 
 ### 2. Nomear o Worker Local
 
