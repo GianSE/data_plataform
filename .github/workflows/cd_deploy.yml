@@ -52,4 +52,4 @@ jobs:
         shell: powershell 
         run: |
           Write-Host "Iniciando script de deploy local..."
-          .\_ops\deploy_runner.ps1
+          .\_ops\deploy\deploy_runner.ps1
