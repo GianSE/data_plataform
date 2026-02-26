@@ -160,28 +160,23 @@ Task usada em flows orquestradores para disparar outros deployments registrados 
 
 ## 🚀 Onboarding (Configuração Local)
 
-O ambiente de desenvolvimento local **não usa venv**. Ele roda dentro de um container Docker idêntico ao de produção, garantindo paridade total entre dev e prod.
+O ambiente local roda dentro de um **container Docker idêntico ao de produção**. Sem venv, sem instalação de dependências na máquina.
 
-### 1. Configurar Variáveis de Ambiente
+> **Nos servidores de produção**, nada disso é necessário. O GitHub Actions já cuida de tudo: injeta o `.env` via Secrets do repositório e gera o `.env.worker` automaticamente a partir do IP da máquina (`worker-192.168.21.xxx`).
 
-```bash
+Os passos abaixo são **apenas para sua máquina de desenvolvimento**.
+
+### 1. Criar o `.env` (credenciais)
+
+```powershell
 copy tasks_python\_settings\.env.example tasks_python\_settings\.env
 ```
 
-Edite `tasks_python/_settings/.env` com as credenciais reais do MariaDB e MinIO. O arquivo `.env.example` já vem com os nomes das variáveis esperadas:
+Preencha com as credenciais reais. O `PYTHONPATH` já vem correto — não altere.
 
-| Variável | Descrição |
-|---|---|
-| `DB_HOST` | IP do servidor MariaDB |
-| `DB_USER` / `DB_PASSWORD` | Credenciais do banco |
-| `DB_NAME` | Nome do database |
-| `MINIO_ENDPOINT` | IP:Porta do MinIO (ex: `192.168.21.251:9000`) |
-| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | Credenciais do MinIO |
-| `PYTHONPATH` | Já preenchido no exemplo — caminhos dentro do container, **não alterar** |
+### 2. Criar o `.env.worker` (nome do worker)
 
-### 2. Nomear o Worker Local
-
-```bash
+```powershell
 copy _ops\prefect-worker\.env.worker.example _ops\prefect-worker\.env.worker
 ```
 
@@ -191,49 +186,95 @@ Edite `_ops/prefect-worker/.env.worker` e defina um nome único para seu noteboo
 WORKER_NAME=notebook-gian-124
 ```
 
-Esse nome identifica o seu worker local dentro do **work pool compartilhado** no Prefect Server. Cada desenvolvedor deve usar um nome diferente para que o Prefect saiba qual máquina executou cada flow run. Nos servidores de produção, esse nome é gerado automaticamente a partir do IP (`worker-192.168.21.xxx`), mas localmente você precisa definir manualmente.
+Esse nome identifica o seu worker local dentro do **work pool compartilhado** no Prefect Server. Cada desenvolvedor deve usar um nome diferente para que o Prefect saiba qual máquina executou cada flow run.
 
-### 3. Subir o Worker Local
+### 3. Subir o container
 
-```bash
+```powershell
 python _ops/deploy/rebuild_worker.py
 ```
 
-Isso constrói a imagem `custom-prefect-worker` e sobe o container com as mesmas dependências, volumes e variáveis de ambiente que os servidores de produção. O código-fonte do projeto é montado em `/app` via bind mount, então qualquer alteração local já é refletida no container.
+### 4. Configurar ambiente de dev
 
-### 4. Rodar o Setup de Desenvolvimento
-
-```bash
+```powershell
 python _ops/deploy/setup_dev.py
 ```
 
-Esse script configura três coisas de uma vez:
-
-| Etapa | O que faz |
-|---|---|
-| **Git Hooks** | Copia `_ops/hooks/pre-commit` para `.git/hooks/`. Antes de cada commit, valida a sintaxe de todos os `.py` staged. |
-| **Git CRLF** | Configura `core.autocrlf=input` e `core.safecrlf=false` para evitar problemas Windows ↔ Linux. |
-| **Alias `worker`** | Registra uma função no `$PROFILE` do PowerShell que permite entrar no container local com um único comando. |
-
-Após reiniciar o terminal, basta digitar:
-
-```powershell
-worker
-```
-
-Para abrir um shell bash diretamente dentro do container do worker local — o mesmo ambiente que roda em produção.
+Isso instala o hook `pre-commit`, ajusta CRLF do Git e cria o atalho `worker` no PowerShell (requer reiniciar o terminal).
 
 ---
 
-## 🛠️ Como Criar um Novo Flow
+## 📋 Passo a Passo Rápido (Dia a Dia)
 
-### 1. Script ETL (`tasks_python/`)
+### Criar um pipeline novo
 
-Crie a lógica de transformação em `tasks_python/{camada}/meu_script.py`. Sem dependência do Prefect — Python puro.
+> Crie a task → teste → crie o wrapper → commit → push. O CI faz o resto.
 
-### 2. Flow Wrapper (`flows_prefect/`)
+**① Crie o script ETL**
+```
+tasks_python/{camada}/meu_script.py
+```
 
-Crie `flows_prefect/{camada}/flow_meu_script.py` usando os primitivos da plataforma:
+**② Teste direto no container**
+```powershell
+worker
+python tasks_python/{camada}/meu_script.py
+```
+Se funcionar aqui, funciona em produção — o container é idêntico.
+
+**③ Crie o flow wrapper**
+```
+flows_prefect/{camada}/flow_meu_script.py
+```
+
+**④ Commit e push**
+```powershell
+git add . ; git commit -m "feat: meu novo pipeline" ; git push
+```
+O CI deploya nos dois servidores. O flow estará agendado no Prefect em ~2 minutos.
+
+> 💡 Quer ver no Prefect UI antes do deploy? Rode `python flows_prefect/{camada}/flow_meu_script.py` dentro do container.
+
+---
+
+### Alterar um pipeline existente
+
+Mais simples — não precisa mexer no wrapper.
+
+**① Edite o script** em `tasks_python/{camada}/`
+
+**② Teste no container**
+```powershell
+worker
+python tasks_python/{camada}/meu_script.py
+```
+
+**③ Commit e push**
+```powershell
+git add . ; git commit -m "fix: ajuste no pipeline X" ; git push
+```
+
+> Se só a task mudou (sem alterar o flow wrapper), o CI atualiza o código no servidor mas não re-registra o deployment — o agendamento permanece igual, só a lógica de execução muda.
+
+### Adicionar uma dependência nova
+
+Se o seu script precisar de uma biblioteca que não está instalada no container:
+
+**① Adicione no requirements.txt**
+```
+_ops/prefect-worker/requirements.txt
+```
+
+**② Rebuild o container local**
+```powershell
+python _ops/deploy/rebuild_worker.py
+```
+
+No próximo push, o CI detecta que o `requirements.txt` mudou (via hash MD5) e reconstrói a imagem Docker automaticamente nos dois servidores.
+
+---
+
+### Exemplo de flow wrapper
 
 ```python
 from flows_prefect._shared.wrappers import python_task, standard_flow
@@ -253,37 +294,24 @@ if __name__ == "__main__":
     )
 ```
 
-### 3. Deploy
-
-```bash
-git add .
-git commit -m "feat: new flow meu_script"
-git push origin main
-```
-
-O sistema descobre e registra o flow automaticamente nos dois servidores.
-
 ---
 
 ## 🔍 Comandos Úteis
 
-```bash
-# Entrar no container local (após setup_dev.py)
+```powershell
+# Entrar no container local
 worker
 
-# Validar sintaxe manualmente
+# Validar sintaxe antes de comitar (manual)
 python _ops/deploy/check_imports.py
 
-# Testar flow localmente (sem deploy)
-python flows_prefect/{camada}/flow_meu_script.py
-
-# Deploy local (rebuild worker + re-registro de flows alterados)
+# Deploy local (rebuild + re-registro)
 .\_ops\deploy\deploy_dev.ps1
 
 # Forçar re-registro de TODOS os flows (dentro do container)
 docker exec <container_id> python /app/_ops/deploy/rebuild_deployments.py --all
 
-# Deploy remoto em massa nos dois servidores (via WinRM)
+# Deploy remoto nos dois servidores via WinRM (sem CI)
 .\_ops\deploy\deploy_full.ps1
 ```
 
