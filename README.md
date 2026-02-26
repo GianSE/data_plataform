@@ -94,11 +94,13 @@ data_plataform/
 │
 └── _ops/                    # Infraestrutura e CI/CD
     ├── deploy/
-    │   ├── deploy_runner.ps1        # Orquestrador do deploy local
+    │   ├── setup_dev.py             # Setup local: hooks + git config + alias 'worker'
+    │   ├── deploy_dev.ps1           # Deploy simplificado na máquina local
+    │   ├── deploy_runner.ps1        # Deploy via CI (Self-Hosted Runner)
+    │   ├── deploy_full.ps1          # Deploy remoto em massa (WinRM → 2 servidores)
     │   ├── rebuild_worker.py        # Rebuild inteligente do Docker (hash MD5)
     │   ├── rebuild_deployments.py   # Re-registro inteligente de flows (hash MD5)
-    │   ├── check_imports.py         # Validador de sintaxe Python
-    │   └── setup_dev.py             # Setup do ambiente de desenvolvimento
+    │   └── check_imports.py         # Validador de sintaxe Python
     ├── hooks/
     │   └── pre-commit               # Git hook: valida sintaxe antes do commit
     └── prefect-worker/
@@ -156,28 +158,44 @@ Task usada em flows orquestradores para disparar outros deployments registrados 
 
 ## 🚀 Onboarding (Configuração Local)
 
-### 1. Preparar Ambiente Python
+O ambiente de desenvolvimento local **não usa venv**. Ele roda dentro de um container Docker idêntico ao de produção, garantindo paridade total entre dev e prod.
 
-```bash
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r _ops/prefect-worker/requirements.txt
-```
-
-### 2. Configurar Variáveis de Ambiente
+### 1. Configurar Variáveis de Ambiente
 
 ```bash
 copy tasks_python\_settings\.env.example tasks_python\_settings\.env
 # Edite o .env com as credenciais do MariaDB e MinIO
 ```
 
-### 3. Instalar Git Hooks
+### 2. Subir o Worker Local
+
+```bash
+python _ops/deploy/rebuild_worker.py
+```
+
+Isso constrói a imagem `custom-prefect-worker` e sobe o container com as mesmas dependências, volumes e variáveis de ambiente que os servidores de produção. O código-fonte do projeto é montado em `/app` via bind mount, então qualquer alteração local já é refletida no container.
+
+### 3. Rodar o Setup de Desenvolvimento
 
 ```bash
 python _ops/deploy/setup_dev.py
 ```
 
-Isso instala o hook `pre-commit` que valida a sintaxe de todos os arquivos Python antes de cada commit.
+Esse script configura três coisas de uma vez:
+
+| Etapa | O que faz |
+|---|---|
+| **Git Hooks** | Copia `_ops/hooks/pre-commit` para `.git/hooks/`. Antes de cada commit, valida a sintaxe de todos os `.py` staged. |
+| **Git CRLF** | Configura `core.autocrlf=input` e `core.safecrlf=false` para evitar problemas Windows ↔ Linux. |
+| **Alias `worker`** | Registra uma função no `$PROFILE` do PowerShell que permite entrar no container local com um único comando. |
+
+Após reiniciar o terminal, basta digitar:
+
+```powershell
+worker
+```
+
+Para abrir um shell bash diretamente dentro do container do worker local — o mesmo ambiente que roda em produção.
 
 ---
 
@@ -213,7 +231,7 @@ if __name__ == "__main__":
 
 ```bash
 git add .
-git commit -m "feat: novo flow meu_script"
+git commit -m "feat: new flow meu_script"
 git push origin main
 ```
 
@@ -224,15 +242,33 @@ O sistema descobre e registra o flow automaticamente nos dois servidores.
 ## 🔍 Comandos Úteis
 
 ```bash
+# Entrar no container local (após setup_dev.py)
+worker
+
 # Validar sintaxe manualmente
 python _ops/deploy/check_imports.py
 
 # Testar flow localmente (sem deploy)
 python flows_prefect/{camada}/flow_meu_script.py
 
+# Deploy local (rebuild worker + re-registro de flows alterados)
+.\_ops\deploy\deploy_dev.ps1
+
 # Forçar re-registro de TODOS os flows (dentro do container)
 docker exec <container_id> python /app/_ops/deploy/rebuild_deployments.py --all
 
-# Rebuild completo do worker manualmente
-python _ops/deploy/rebuild_worker.py
+# Deploy remoto em massa nos dois servidores (via WinRM)
+.\_ops\deploy\deploy_full.ps1
 ```
+
+---
+
+## 📜 Scripts de Deploy
+
+| Script | Onde roda | O que faz |
+|---|---|---|
+| `deploy_dev.ps1` | Máquina local | Executa `rebuild_worker.py` + `rebuild_deployments.py` em sequência |
+| `deploy_runner.ps1` | Self-Hosted Runner (CI) | Mesmo que o dev, mas com cache de `requirements.txt` via hash persistido em `C:\deploy_metadata\` |
+| `deploy_full.ps1` | Máquina local (remoto) | Conecta nos dois servidores via WinRM, faz `git pull` + rebuild + deploy em cada um |
+| `rebuild_worker.py` | Qualquer | Reconstrói a imagem Docker apenas se `Dockerfile` ou `requirements.txt` mudaram (hash MD5) |
+| `rebuild_deployments.py` | Dentro do container | Varre `flows_prefect/`, re-registra no Prefect apenas os `flow_*.py` alterados (hash MD5) |
